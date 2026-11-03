@@ -5,8 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Asclepio</title>
 <meta name="theme-color" content="#14171c">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Asclepio">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -18,9 +23,19 @@
 <div class="login-screen" id="loginScreen">
   <div class="login-mark">ASCLEPIO</div>
   <h1 class="login-title">Tu bitácora de salud</h1>
-  <p class="login-sub">Entra con tu correo. Te mandamos un link, sin contraseña.</p>
-  <input type="email" id="loginEmail" placeholder="tucorreo@ejemplo.com" autocomplete="email">
-  <button class="btn-primary" id="loginBtn" style="width:100%; display:block;">Enviar link de acceso</button>
+  <p class="login-sub" id="loginSub">Entra con tu correo. Te mandamos un código, sin contraseña.</p>
+
+  <div id="loginStepEmail">
+    <input type="email" id="loginEmail" placeholder="tucorreo@ejemplo.com" autocomplete="email">
+    <button class="btn-primary" id="loginBtn" style="width:100%; display:block;">Enviar código</button>
+  </div>
+
+  <div id="loginStepCode" class="hidden">
+    <input type="text" id="loginCode" placeholder="Código del correo" inputmode="numeric" autocomplete="one-time-code" maxlength="10">
+    <button class="btn-primary" id="verifyBtn" style="width:100%; display:block;">Entrar</button>
+    <button class="btn-link" id="backToEmailBtn" type="button">Usar otro correo</button>
+  </div>
+
   <div class="login-status" id="loginStatus"></div>
 </div>
 
@@ -35,23 +50,13 @@
       </div>
     </div>
     <div class="stat-strip" id="statStrip"></div>
-    <div id="ringRow"></div>
   </header>
 
-  <div id="insightArea"></div>
-
-  <div class="favorites-row" id="favoritesRow"></div>
-  <div class="quick-grid" id="quickGrid"></div>
-  <div id="formArea"></div>
-
-  <div class="tabs">
-    <button class="tab-btn active" data-tab="hoy">Hoy</button>
-    <button class="tab-btn" data-tab="historial">Historial</button>
-    <button class="tab-btn" data-tab="ranking">Ranking</button>
-    <button class="tab-btn" data-tab="datos">Datos</button>
-  </div>
-
   <div class="panel active" id="panel-hoy">
+    <div id="ringRow"></div>
+    <div id="insightArea"></div>
+    <div class="favorites-row" id="favoritesRow"></div>
+    <div class="quick-grid" id="quickGrid"></div>
     <div id="todayTimeline"></div>
   </div>
 
@@ -65,12 +70,26 @@
 
   <div class="panel" id="panel-datos">
     <div class="stat-grid" id="fullStats"></div>
+
+    <div class="data-card">
+      <h4>Tus metas diarias</h4>
+      <p>Las barras de la pantalla principal se miden contra estos números.</p>
+      <div class="row-2">
+        <div class="field"><label>Calorías (kcal)</label><input type="number" id="goalKcal" inputmode="numeric" min="0"></div>
+        <div class="field"><label>Proteína (g)</label><input type="number" id="goalProtein" inputmode="numeric" min="0"></div>
+        <div class="field"><label>Carbos (g)</label><input type="number" id="goalCarbs" inputmode="numeric" min="0"></div>
+        <div class="field"><label>Grasa (g)</label><input type="number" id="goalFat" inputmode="numeric" min="0"></div>
+      </div>
+      <button class="btn-primary" id="saveGoalsBtn" style="--cat-color: var(--accent)">Guardar metas</button>
+    </div>
+
     <div class="data-card">
       <h4>Tu perfil</h4>
       <p>Así te ven los demás en el ranking.</p>
       <div class="field"><label>Nombre</label><input type="text" id="displayNameInput"></div>
       <button class="btn-ghost" id="saveNameBtn">Guardar nombre</button>
     </div>
+
     <div class="data-card">
       <h4>Reporte</h4>
       <p>Genera un resumen de texto de tu día o semana — pásamelo para que te diga qué ajustar.</p>
@@ -81,6 +100,21 @@
       <button class="btn-primary" id="reportBtn" style="--cat-color: var(--accent)">Generar y descargar reporte</button>
     </div>
   </div>
+</div>
+
+<!-- ============ TAB BAR FIJA ============ -->
+<nav class="tabbar hidden" id="tabBar">
+  <button class="tab-btn active" data-tab="hoy"><span class="tab-ic">◉</span><span class="tab-lb">Hoy</span></button>
+  <button class="tab-btn" data-tab="historial"><span class="tab-ic">☷</span><span class="tab-lb">Historial</span></button>
+  <button class="tab-btn" data-tab="ranking"><span class="tab-ic">♛</span><span class="tab-lb">Ranking</span></button>
+  <button class="tab-btn" data-tab="datos"><span class="tab-ic">⚙</span><span class="tab-lb">Datos</span></button>
+</nav>
+
+<!-- ============ BOTTOM SHEET ============ -->
+<div class="sheet-backdrop hidden" id="sheetBackdrop"></div>
+<div class="sheet hidden" id="sheet" role="dialog" aria-modal="true">
+  <div class="sheet-grip"></div>
+  <div id="formArea"></div>
 </div>
 
 <div class="toast" id="toast"></div>
