@@ -31,12 +31,18 @@ export function buildReportText({ displayName, fromDate, toDate, entries, profil
         NUTRIENT_FIELDS.forEach(f => { if(d[f.key] != null) totals[f.key] += Number(d[f.key]); });
       } else if(e.type === 'gym'){
         const d = e.data;
-        lines.push(`- [${e.time}] Gym: ${d.fue === false ? 'no fue' : `${d.entreno || 'entrenamiento'} (${d.duracion || '?'} min)`}`);
+        const tipos = Array.isArray(d.tipos) && d.tipos.length ? d.tipos.join(' + ') : (d.entreno || 'entrenamiento');
+        lines.push(`- [${e.time}] Gym: ${d.fue === false ? 'día de descanso' : `${tipos}${d.duracion ? ' (' + d.duracion + ' min)' : ''}${d.rpe ? ', RPE ' + d.rpe + '/10' : ''}`}`);
       } else if(e.type === 'bano'){
-        lines.push(`- [${e.time}] Baño${e.data.nota ? ': ' + e.data.nota : ''}`);
+        const d = e.data;
+        const extras = Array.isArray(d.extras) && d.extras.length ? d.extras.join(', ') : '';
+        const detalle = [d.tipo, extras, d.nota].filter(Boolean).join(' · ');
+        lines.push(`- [${e.time}] Baño${detalle ? ': ' + detalle : ''}`);
       } else if(e.type === 'sueno'){
         const d = e.data;
-        lines.push(`- [${e.time}] Sueño: dejó el teléfono ${d.dejoTelefono || '?'}, durmió ${d.horaDormir || '?'} → ${d.horaDespertar || '?'}, calidad ${d.calidad || '?'}/5`);
+        const dur = d.duracion_h != null ? `, duración ${d.duracion_h} h` : '';
+        const lat = d.latencia_min != null ? `, latencia ${d.latencia_min} min` : '';
+        lines.push(`- [${e.time}] Sueño: dejó el teléfono ${d.dejoTelefono || '?'}, durmió ${d.horaDormir || '?'} → ${d.horaDespertar || '?'}${dur}${lat}, calidad ${d.calidad || '?'}/5`);
       } else if(e.type === 'energia'){
         const d = e.data;
         lines.push(`- [${e.time}] Energía (${d.momento}): ${d.nivel}/5${d.nota ? ' · ' + d.nota : ''}`);

@@ -1,5 +1,8 @@
 import { supabase } from './supabaseClient.js';
-import { sendMagicLink, signOut, getSession, onAuthChange, ensureProfile, getMyProfile, updateDisplayName } from './auth.js';
+import {
+  sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
+  ensureProfile, getMyProfile, updateDisplayName, updateGoals
+} from './auth.js';
 import {
   NUTRIENT_FIELDS, searchUsda, searchLocalFoods, searchFavorites,
   cacheUsdaFood, addCustomFood, logFood, deleteFoodLog
@@ -7,22 +10,93 @@ import {
 import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js';
 import { buildReportText, downloadText } from './report.js';
 
+/* ================= utilidades de hora ================= */
+
+function pad(n){ return n.toString().padStart(2,'0'); }
+function todayStr(){ const d = new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+function nowStr(){ const d = new Date(); return pad(d.getHours())+':'+pad(d.getMinutes()); }
+function daysAgoStr(n){ const d = new Date(); d.setDate(d.getDate()-n); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+
+function guessMomento(){
+  const h = new Date().getHours();
+  if(h < 11) return 'Desayuno';
+  if(h < 16) return 'Almuerzo';
+  if(h < 21) return 'Cena';
+  return 'Snack';
+}
+
+// momento del día para el registro de energía, según la hora del teléfono
+function momentoDelDia(){
+  const h = new Date().getHours();
+  if(h < 12) return 'Mañana';
+  if(h < 15) return 'Mediodía';
+  if(h < 20) return 'Tarde';
+  return 'Noche';
+}
+
+function toMin(hhmm){
+  const [h, m] = hhmm.split(':').map(Number);
+  return h * 60 + m;
+}
+// minutos desde a hasta b, cruzando la medianoche si hace falta
+function minsBetween(a, b){
+  return (toMin(b) - toMin(a) + 1440) % 1440;
+}
+function fmtDur(mins){
+  const h = Math.floor(mins / 60), m = mins % 60;
+  if(h === 0) return `${m} min`;
+  return m === 0 ? `${h} h` : `${h} h ${m} min`;
+}
+
+// duración total y latencia (tiempo entre soltar el teléfono y dormirse)
+function calcSleep(d){
+  const out = { dur: null, lat: null };
+  if(d.horaDormir && d.horaDespertar){
+    const m = minsBetween(d.horaDormir, d.horaDespertar);
+    if(m > 0 && m <= 16 * 60) out.dur = m;
+  }
+  if(d.dejoTelefono && d.horaDormir){
+    const m = minsBetween(d.dejoTelefono, d.horaDormir);
+    if(m <= 6 * 60) out.lat = m;   // más de 6 h probablemente significa que soltó el teléfono después de dormir
+  }
+  return out;
+}
+
 /* ================= config por tipo de actividad (no-comida) ================= */
 
 const TYPES = {
   gym: {
     label: 'Gym', icon: '🏋️', color: 'var(--c-gym)',
+    base: { fue: true },
     fields: [
-      { key:'fue', label:'¿Fuiste?', type:'bool', default:true },
-      { key:'entreno', label:'Qué entrenaste', type:'text', placeholder:'pierna, espalda...', showIf: d => d.fue },
-      { key:'duracion', label:'Duración (min)', type:'number', placeholder:'60', showIf: d => d.fue }
+      { key:'tipos', label:'Qué entrenaste', type:'chips', multi:true,
+        options:['Push','Pull','Legs','Upper','Lower','Fútbol','Cardio / HIIT'] },
+      { key:'rpe', label:'Esfuerzo percibido (RPE 1–10)', type:'scale', max:10 },
+      { key:'duracion', label:'Duración (min)', type:'number', placeholder:'60' }
     ],
-    summary: d => d.fue === false ? 'No fue' : `${d.entreno || 'Entrenamiento'}${d.duracion ? ' · ' + d.duracion + ' min' : ''}`
+    restAction: { label:'Hoy es día de descanso', data:{ fue:false } },
+    finalize: d => ({ ...d, duracion: d.duracion ? Number(d.duracion) : undefined }),
+    summary: d => {
+      if(d.fue === false) return 'Día de descanso';
+      const tipos = Array.isArray(d.tipos) && d.tipos.length ? d.tipos.join(' + ') : (d.entreno || 'Entrenamiento');
+      return `${tipos}${d.duracion ? ' · ' + d.duracion + ' min' : ''}${d.rpe ? ' · RPE ' + d.rpe : ''}`;
+    }
   },
   bano: {
     label: 'Baño', icon: '🚽', color: 'var(--c-bano)',
-    fields: [{ key:'nota', label:'Nota (opcional)', type:'text', placeholder:'' }],
-    summary: d => d.nota ? d.nota : 'Registrado'
+    fields: [
+      { key:'tipo', label:'Cómo fue (escala de Bristol)', type:'chips', multi:false,
+        options:['Duro (1–2)','Normal (3–4)','Suelto (5–6)','Líquido (7)'] },
+      { key:'extras', label:'Además', type:'chips', multi:true, options:['Hinchazón'] },
+      { key:'nota', label:'Nota (opcional)', type:'text', placeholder:'' }
+    ],
+    summary: d => {
+      const parts = [];
+      if(d.tipo) parts.push(d.tipo);
+      if(Array.isArray(d.extras) && d.extras.length) parts.push(d.extras.join(', '));
+      if(d.nota) parts.push(d.nota);
+      return parts.length ? parts.join(' · ') : 'Registrado';
+    }
   },
   sueno: {
     label: 'Sueño', icon: '🌙', color: 'var(--c-sueno)',
@@ -30,15 +104,35 @@ const TYPES = {
       { key:'dejoTelefono', label:'Dejaste el teléfono', type:'time' },
       { key:'horaDormir', label:'Te dormiste', type:'time' },
       { key:'horaDespertar', label:'Te despertaste', type:'time' },
+      { key:'_calc', type:'calc' },
       { key:'calidad', label:'Calidad', type:'scale', max:5, default:3 }
     ],
-    summary: d => `${d.horaDormir || '?'} → ${d.horaDespertar || '?'}${d.calidad ? ' · calidad ' + d.calidad + '/5' : ''}`
+    calc: d => {
+      const { dur, lat } = calcSleep(d);
+      if(dur == null && lat == null) return 'Completa las horas para calcular duración y latencia.';
+      const parts = [];
+      parts.push(dur != null ? `Dormiste <b>${fmtDur(dur)}</b>` : 'Duración: falta hora de dormir o despertar');
+      parts.push(lat != null ? `Tardaste <b>${fmtDur(lat)}</b> en dormirte tras soltar el teléfono` : 'Latencia: falta hora de soltar el teléfono');
+      return parts.join('<br>');
+    },
+    finalize: d => {
+      const { dur, lat } = calcSleep(d);
+      const out = { ...d };
+      if(dur != null) out.duracion_h = Math.round(dur / 6) / 10;   // horas con 1 decimal
+      if(lat != null) out.latencia_min = lat;
+      return out;
+    },
+    summary: d => {
+      const dur = d.duracion_h != null ? ` · ${d.duracion_h} h` : '';
+      const lat = d.latencia_min != null ? ` · latencia ${d.latencia_min} min` : '';
+      return `${d.horaDormir || '?'} → ${d.horaDespertar || '?'}${dur}${lat}${d.calidad ? ' · calidad ' + d.calidad + '/5' : ''}`;
+    }
   },
   energia: {
     label: 'Energía', icon: '⚡', color: 'var(--c-energia)',
     fields: [
       { key:'nivel', label:'Nivel', type:'scale', max:5, default:3 },
-      { key:'momento', label:'Momento del día', type:'select', options:['Mañana','Tarde','Noche'], default:'Tarde' },
+      { key:'momento', label:'Momento del día', type:'select', options:['Mañana','Mediodía','Tarde','Noche'], default: momentoDelDia },
       { key:'nota', label:'Nota (opcional)', type:'text' }
     ],
     summary: d => `${d.momento || ''}: ${d.nivel || '?'}/5${d.nota ? ' · ' + d.nota : ''}`
@@ -61,27 +155,20 @@ const CAT_LABEL = { comida: 'Comida', gym: 'Gym', bano: 'Baño', sueno: 'Sueño'
 let session = null;
 let user = null;
 let profile = null;
-
-/* ================= utilidades de fecha ================= */
-
-function pad(n){ return n.toString().padStart(2,'0'); }
-function todayStr(){ const d = new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
-function nowStr(){ const d = new Date(); return pad(d.getHours())+':'+pad(d.getMinutes()); }
-function daysAgoStr(n){ const d = new Date(); d.setDate(d.getDate()-n); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
-function guessMomento(){
-  const h = new Date().getHours();
-  if(h < 11) return 'Desayuno';
-  if(h < 16) return 'Almuerzo';
-  if(h < 21) return 'Cena';
-  return 'Snack';
-}
+let bootedFor = null;   // evita repetir el arranque cuando Supabase refresca el token
 
 /* ================= DOM refs ================= */
 
 const loginScreen = document.getElementById('loginScreen');
 const appShell = document.getElementById('appShell');
+const tabBar = document.getElementById('tabBar');
 const loginEmail = document.getElementById('loginEmail');
+const loginCode = document.getElementById('loginCode');
 const loginBtn = document.getElementById('loginBtn');
+const verifyBtn = document.getElementById('verifyBtn');
+const backToEmailBtn = document.getElementById('backToEmailBtn');
+const loginStepEmail = document.getElementById('loginStepEmail');
+const loginStepCode = document.getElementById('loginStepCode');
 const loginStatus = document.getElementById('loginStatus');
 const logoutBtn = document.getElementById('logoutBtn');
 const todayDateEl = document.getElementById('todayDate');
@@ -91,6 +178,8 @@ const insightArea = document.getElementById('insightArea');
 const favoritesRow = document.getElementById('favoritesRow');
 const quickGrid = document.getElementById('quickGrid');
 const formArea = document.getElementById('formArea');
+const sheet = document.getElementById('sheet');
+const sheetBackdrop = document.getElementById('sheetBackdrop');
 const toastEl = document.getElementById('toast');
 
 function showToast(msg){
@@ -104,42 +193,103 @@ function escapeHtml(str){
   return div.innerHTML;
 }
 
+/* ================= bottom sheet ================= */
+
+function openSheet(){
+  sheet.classList.remove('hidden');
+  sheetBackdrop.classList.remove('hidden');
+  document.body.classList.add('sheet-open');
+  sheet.scrollTop = 0;
+}
+function resetForm(){
+  formArea.innerHTML = '';
+  openSheet();
+}
+function closeForm(){
+  formArea.innerHTML = '';
+  sheet.classList.add('hidden');
+  sheetBackdrop.classList.add('hidden');
+  document.body.classList.remove('sheet-open');
+}
+sheetBackdrop.addEventListener('click', closeForm);
+
 /* ================= login ================= */
+
+let pendingEmail = '';
+
+function setLoginStatus(msg, isError){
+  loginStatus.classList.toggle('error', !!isError);
+  loginStatus.innerHTML = msg;
+}
 
 loginBtn.addEventListener('click', async () => {
   const email = loginEmail.value.trim();
-  if(!email){ loginStatus.textContent = 'Escribe tu correo.'; loginStatus.classList.add('error'); return; }
+  if(!email){ setLoginStatus('Escribe tu correo.', true); return; }
   loginBtn.disabled = true;
-  loginStatus.classList.remove('error');
-  loginStatus.innerHTML = '<span class="spinner"></span> enviando...';
+  setLoginStatus('<span class="spinner"></span> enviando...');
   try{
     await sendMagicLink(email);
-    loginStatus.textContent = 'Revisa tu correo y toca el link para entrar.';
+    pendingEmail = email;
+    loginStepEmail.classList.add('hidden');
+    loginStepCode.classList.remove('hidden');
+    loginCode.value = '';
+    loginCode.focus();
+    setLoginStatus('Te enviamos un correo. Escribe el código que trae (o toca el link del correo).');
   }catch(err){
-    loginStatus.textContent = 'No se pudo enviar: ' + err.message;
-    loginStatus.classList.add('error');
+    setLoginStatus('No se pudo enviar: ' + escapeHtml(err.message), true);
   }finally{
     loginBtn.disabled = false;
   }
+});
+
+verifyBtn.addEventListener('click', async () => {
+  const code = loginCode.value.trim();
+  if(!code){ setLoginStatus('Escribe el código del correo.', true); return; }
+  verifyBtn.disabled = true;
+  setLoginStatus('<span class="spinner"></span> verificando...');
+  try{
+    await verifyEmailCode(pendingEmail, code);
+    setLoginStatus('');
+  }catch(err){
+    setLoginStatus('Código inválido o vencido. Pide uno nuevo.', true);
+  }finally{
+    verifyBtn.disabled = false;
+  }
+});
+
+backToEmailBtn.addEventListener('click', () => {
+  loginStepCode.classList.add('hidden');
+  loginStepEmail.classList.remove('hidden');
+  setLoginStatus('');
 });
 
 logoutBtn.addEventListener('click', async () => {
   await signOut();
 });
 
-onAuthChange(async (s) => {
+async function handleSession(s){
   session = s;
-  if(session){
-    user = session.user;
+  if(s){
+    user = s.user;
+    if(bootedFor === user.id) return;
+    bootedFor = user.id;
     loginScreen.classList.add('hidden');
     appShell.classList.remove('hidden');
+    tabBar.classList.remove('hidden');
     await bootApp();
   }else{
-    user = null; profile = null;
+    user = null; profile = null; bootedFor = null;
+    closeForm();
     appShell.classList.add('hidden');
+    tabBar.classList.add('hidden');
     loginScreen.classList.remove('hidden');
+    loginStepCode.classList.add('hidden');
+    loginStepEmail.classList.remove('hidden');
+    setLoginStatus('');
   }
-});
+}
+
+onAuthChange(handleSession);
 
 /* ================= boot ================= */
 
@@ -153,6 +303,7 @@ async function bootApp(){
     return;
   }
   document.getElementById('displayNameInput').value = profile.display_name;
+  fillGoalInputs();
   renderQuickGrid();
   await Promise.all([renderFavorites(), renderToday(), renderStats(), renderRanking()]);
   renderHistoryPlaceholder();
@@ -205,10 +356,12 @@ async function renderFavorites(){
 
 function openActivityForm(typeKey){
   const t = TYPES[typeKey];
-  const data = {};
-  t.fields.forEach(f => { if(f.default !== undefined) data[f.key] = f.default; });
+  const data = { ...(t.base || {}) };
+  t.fields.forEach(f => {
+    if(f.default !== undefined) data[f.key] = typeof f.default === 'function' ? f.default() : f.default;
+  });
 
-  formArea.innerHTML = '';
+  resetForm();
   const card = document.createElement('div');
   card.className = 'form-card';
   card.style.setProperty('--cat-color', t.color);
@@ -227,10 +380,26 @@ function openActivityForm(typeKey){
   const fieldsWrap = document.createElement('div');
   card.appendChild(fieldsWrap);
 
+  function refreshCalc(){
+    const box = card.querySelector('.calc-box');
+    if(box && t.calc) box.innerHTML = t.calc(data);
+  }
+  function setVal(key, val){
+    data[key] = val;
+    refreshCalc();
+  }
+
   function renderFields(){
     fieldsWrap.innerHTML = '';
     t.fields.forEach(f => {
-      if(f.showIf && !f.showIf(data)) return;
+      if(f.type === 'calc'){
+        const box = document.createElement('div');
+        box.className = 'calc-box';
+        box.innerHTML = t.calc(data);
+        fieldsWrap.appendChild(box);
+        return;
+      }
+
       const wrap = document.createElement('div');
       wrap.className = 'field';
       const label = document.createElement('label');
@@ -240,39 +409,47 @@ function openActivityForm(typeKey){
       if(f.type === 'text'){
         const inp = document.createElement('input'); inp.type = 'text';
         inp.placeholder = f.placeholder || ''; inp.value = data[f.key] || '';
-        inp.addEventListener('input', () => { data[f.key] = inp.value; });
+        inp.addEventListener('input', () => setVal(f.key, inp.value));
         wrap.appendChild(inp);
       } else if(f.type === 'textarea'){
         const inp = document.createElement('textarea');
         inp.placeholder = f.placeholder || ''; inp.value = data[f.key] || '';
-        inp.addEventListener('input', () => { data[f.key] = inp.value; });
+        inp.addEventListener('input', () => setVal(f.key, inp.value));
         wrap.appendChild(inp);
       } else if(f.type === 'number'){
-        const inp = document.createElement('input'); inp.type = 'number';
+        const inp = document.createElement('input'); inp.type = 'number'; inp.inputMode = 'numeric';
         inp.placeholder = f.placeholder || ''; inp.value = data[f.key] || '';
-        inp.addEventListener('input', () => { data[f.key] = inp.value; });
+        inp.addEventListener('input', () => setVal(f.key, inp.value));
         wrap.appendChild(inp);
       } else if(f.type === 'time'){
         const inp = document.createElement('input'); inp.type = 'time'; inp.value = data[f.key] || '';
-        inp.addEventListener('input', () => { data[f.key] = inp.value; });
+        inp.addEventListener('input', () => setVal(f.key, inp.value));
         wrap.appendChild(inp);
       } else if(f.type === 'select'){
         const sel = document.createElement('select');
         f.options.forEach(opt => {
           const o = document.createElement('option'); o.value = opt; o.textContent = opt;
-          if((data[f.key] || f.default) === opt) o.selected = true;
+          if(data[f.key] === opt) o.selected = true;
           sel.appendChild(o);
         });
-        data[f.key] = data[f.key] || f.default;
-        sel.addEventListener('change', () => { data[f.key] = sel.value; });
+        sel.addEventListener('change', () => setVal(f.key, sel.value));
         wrap.appendChild(sel);
-      } else if(f.type === 'bool'){
-        const row = document.createElement('div'); row.className = 'toggle-pair';
-        ['Sí','No'].forEach(opt => {
+      } else if(f.type === 'chips'){
+        const row = document.createElement('div'); row.className = 'chip-row';
+        f.options.forEach(opt => {
+          const isOn = f.multi ? (data[f.key] || []).includes(opt) : data[f.key] === opt;
           const b = document.createElement('button'); b.type = 'button';
-          b.className = 'pill-btn' + (((data[f.key] ?? f.default) === (opt === 'Sí')) ? ' selected' : '');
+          b.className = 'chip' + (isOn ? ' selected' : '');
           b.textContent = opt;
-          b.addEventListener('click', () => { data[f.key] = (opt === 'Sí'); renderFields(); });
+          b.addEventListener('click', () => {
+            if(f.multi){
+              const cur = data[f.key] || [];
+              data[f.key] = cur.includes(opt) ? cur.filter(x => x !== opt) : [...cur, opt];
+            } else {
+              data[f.key] = data[f.key] === opt ? null : opt;
+            }
+            renderFields();
+          });
           row.appendChild(b);
         });
         wrap.appendChild(row);
@@ -296,40 +473,52 @@ function openActivityForm(typeKey){
   actions.className = 'form-actions';
   actions.innerHTML = `<button class="btn-ghost" id="cancelBtn">Cancelar</button><button class="btn-primary" id="saveBtn">Guardar</button>`;
   card.appendChild(actions);
+
+  if(t.restAction){
+    const rest = document.createElement('button');
+    rest.className = 'btn-link'; rest.type = 'button'; rest.id = 'restBtn';
+    rest.textContent = t.restAction.label;
+    card.appendChild(rest);
+  }
   formArea.appendChild(card);
 
-  card.querySelector('#cancelBtn').addEventListener('click', closeForm);
-  card.querySelector('#saveBtn').addEventListener('click', async () => {
-    const required = t.fields.filter(f => f.required && (!f.showIf || f.showIf(data)));
-    for(const f of required){
-      if(!data[f.key] || (typeof data[f.key] === 'string' && !data[f.key].trim())){
-        showToast(`Falta: ${f.label}`); return;
-      }
-    }
+  async function persist(payload, button, idleLabel){
     const fecha = document.getElementById('f_fecha').value || todayStr();
     const hora = document.getElementById('f_hora').value || nowStr();
-    const saveBtn = card.querySelector('#saveBtn');
-    saveBtn.disabled = true; saveBtn.textContent = 'Guardando...';
+    button.disabled = true; button.textContent = 'Guardando...';
     try{
-      await logActivity({ userId: user.id, type: typeKey, date: fecha, time: hora, data });
+      await logActivity({ userId: user.id, type: typeKey, date: fecha, time: hora, data: payload });
       closeForm();
       showToast('Guardado');
       await refreshAfterLog();
     }catch(err){
       showToast('Error: ' + err.message);
-      saveBtn.disabled = false; saveBtn.textContent = 'Guardar';
+      button.disabled = false; button.textContent = idleLabel;
     }
+  }
+
+  card.querySelector('#cancelBtn').addEventListener('click', closeForm);
+  card.querySelector('#saveBtn').addEventListener('click', async (ev) => {
+    const required = t.fields.filter(f => f.required);
+    for(const f of required){
+      if(!data[f.key] || (typeof data[f.key] === 'string' && !data[f.key].trim())){
+        showToast(`Falta: ${f.label}`); return;
+      }
+    }
+    const payload = t.finalize ? t.finalize(data) : { ...data };
+    await persist(payload, ev.currentTarget, 'Guardar');
   });
-
-  card.scrollIntoView({ behavior:'smooth', block:'start' });
+  if(t.restAction){
+    card.querySelector('#restBtn').addEventListener('click', (ev) => {
+      persist({ ...t.restAction.data }, ev.currentTarget, t.restAction.label);
+    });
+  }
 }
-
-function closeForm(){ formArea.innerHTML = ''; }
 
 /* ================= formulario: comida (búsqueda USDA + local) ================= */
 
 function openFoodForm(){
-  formArea.innerHTML = '';
+  resetForm();
   const card = document.createElement('div');
   card.className = 'form-card';
   card.style.setProperty('--cat-color', CAT_COLOR.comida);
@@ -394,7 +583,7 @@ async function runFoodSearch(query, resultsWrap){
 }
 
 async function openQuantityStep(foodResult){
-  formArea.innerHTML = '';
+  resetForm();
   const card = document.createElement('div');
   card.className = 'form-card';
   card.style.setProperty('--cat-color', CAT_COLOR.comida);
@@ -419,7 +608,7 @@ async function openQuantityStep(foodResult){
     </div>
     <div class="field">
       <label>Cantidad (en porciones de ${escapeHtml(foodResult.serving_label)})</label>
-      <input type="number" id="f_qty" value="1" min="0.1" step="0.1">
+      <input type="number" id="f_qty" value="1" min="0.1" step="0.1" inputmode="decimal">
     </div>
     <div class="form-actions">
       <button class="btn-ghost" id="cancelBtn">Cancelar</button>
@@ -454,7 +643,7 @@ async function openQuantityStep(foodResult){
 }
 
 function openNewFoodForm(){
-  formArea.innerHTML = '';
+  resetForm();
   const card = document.createElement('div');
   card.className = 'form-card';
   card.style.setProperty('--cat-color', CAT_COLOR.comida);
@@ -462,7 +651,7 @@ function openNewFoodForm(){
   const nutrientInputs = NUTRIENT_FIELDS.map(f => `
     <div class="field">
       <label>${f.label} (${f.unit})</label>
-      <input type="number" step="0.1" data-nutri="${f.key}" placeholder="opcional">
+      <input type="number" step="0.1" inputmode="decimal" data-nutri="${f.key}" placeholder="opcional">
     </div>`).join('');
 
   card.innerHTML = `
@@ -515,6 +704,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+    window.scrollTo({ top: 0 });
     if(btn.dataset.tab === 'historial') await renderHistory();
     if(btn.dataset.tab === 'ranking') await renderRanking();
   });
@@ -653,7 +843,7 @@ function renderRings(foodEntries){
       <div class="macro-row">
         ${macros.map(m => `
           <div class="macro-item">
-            <div class="macro-top"><span>${m.label}</span><b>${Math.round(totals[m.key])}g</b></div>
+            <div class="macro-top"><span>${m.label}</span><span><b>${Math.round(totals[m.key])}</b><span class="goal"> / ${Math.round(m.goal)}g</span></span></div>
             <div class="macro-bar"><div class="macro-bar-fill" style="width:${pctWidth(totals[m.key], m.goal)}; background:${m.color};"></div></div>
           </div>`).join('')}
       </div>
@@ -687,12 +877,9 @@ async function renderInsight(entries){
         energiaByDate[date] = energiaByDate[date] || [];
         energiaByDate[date].push(Number(e.data.nivel));
       }
-      if(e.type === 'sueno' && e.data.horaDormir && e.data.horaDespertar){
-        const [h1,m1] = e.data.horaDormir.split(':').map(Number);
-        const [h2,m2] = e.data.horaDespertar.split(':').map(Number);
-        let mins = (h2*60+m2) - (h1*60+m1);
-        if(mins < 0) mins += 24*60;
-        sleepHoursByDate[date] = mins/60;
+      if(e.type === 'sueno'){
+        const { dur } = calcSleep(e.data);
+        if(dur != null) sleepHoursByDate[date] = dur / 60;
       }
     });
   });
@@ -713,7 +900,6 @@ async function renderInsight(entries){
       ? `Tu energía promedio es <b>${eGym.toFixed(1)}/5</b> los días que vas al gym, vs <b>${eNoGym.toFixed(1)}/5</b> los días que no.`
       : `Tu energía promedio es más baja (<b>${eGym.toFixed(1)}/5</b>) los días que vas al gym que los que no (<b>${eNoGym.toFixed(1)}/5</b>) — vale la pena ver si es por falta de recuperación.`;
   } else {
-    // alterna: sueño vs energía del mismo día
     const pairs = Object.keys(sleepHoursByDate).filter(d => energiaByDate[d]);
     if(pairs.length >= 4){
       const highSleep = pairs.filter(d => sleepHoursByDate[d] >= 7);
@@ -736,7 +922,33 @@ async function refreshAfterLog(){
   await Promise.all([renderToday(), renderStats(), renderFavorites()]);
 }
 
-/* ================= perfil / nombre ================= */
+/* ================= perfil / metas ================= */
+
+function fillGoalInputs(){
+  document.getElementById('goalKcal').value = Math.round(profile.goal_kcal);
+  document.getElementById('goalProtein').value = Math.round(profile.goal_protein_g);
+  document.getElementById('goalCarbs').value = Math.round(profile.goal_carbs_g);
+  document.getElementById('goalFat').value = Math.round(profile.goal_fat_g);
+}
+
+document.getElementById('saveGoalsBtn').addEventListener('click', async () => {
+  const goals = {
+    goal_kcal: Number(document.getElementById('goalKcal').value),
+    goal_protein_g: Number(document.getElementById('goalProtein').value),
+    goal_carbs_g: Number(document.getElementById('goalCarbs').value),
+    goal_fat_g: Number(document.getElementById('goalFat').value)
+  };
+  if(Object.values(goals).some(v => !Number.isFinite(v) || v <= 0)){
+    showToast('Todas las metas deben ser mayores a 0');
+    return;
+  }
+  try{
+    await updateGoals(user.id, goals);
+    profile = { ...profile, ...goals };
+    await renderToday();
+    showToast('Metas guardadas');
+  }catch(err){ showToast('Error: ' + err.message); }
+});
 
 document.getElementById('saveNameBtn').addEventListener('click', async () => {
   const val = document.getElementById('displayNameInput').value.trim();
@@ -764,11 +976,5 @@ document.getElementById('reportBtn').addEventListener('click', async () => {
 /* ================= arranque ================= */
 
 (async function init(){
-  session = await getSession();
-  if(session){
-    user = session.user;
-    loginScreen.classList.add('hidden');
-    appShell.classList.remove('hidden');
-    await bootApp();
-  }
+  await handleSession(await getSession());
 })();

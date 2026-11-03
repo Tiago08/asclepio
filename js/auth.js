@@ -14,6 +14,24 @@ export async function sendMagicLink(email) {
   if (error) throw error;
 }
 
+/**
+ * Verifica el código de 6 dígitos que llega en el mismo correo.
+ * Sirve para entrar dentro de la PWA instalada, donde el link
+ * mágico no funciona (abre Safari, que tiene su propio almacenamiento).
+ */
+export async function verifyEmailCode(email, token) {
+  const { error } = await supabase.auth.verifyOtp({ email, token, type: 'email' });
+  if (error) throw error;
+}
+
+export async function updateGoals(userId, goals) {
+  const { error } = await supabase
+    .from('profiles')
+    .update(goals)
+    .eq('id', userId);
+  if (error) throw error;
+}
+
 export async function signOut() {
   await supabase.auth.signOut();
 }
