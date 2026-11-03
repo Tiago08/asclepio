@@ -1,5 +1,5 @@
-import { supabase } from './supabaseClient.js';
-import { USDA_API_KEY } from './config.js';
+import { supabase } from './supabaseClient.js?v=5';
+import { USDA_API_KEY } from './config.js?v=5';
 
 // Campos nutricionales que manejamos en toda la app, en el orden
 // en que se muestran. Un solo lugar para no desincronizar listas.

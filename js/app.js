@@ -1,14 +1,14 @@
-import { supabase } from './supabaseClient.js';
+import { supabase } from './supabaseClient.js?v=5';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js';
+} from './auth.js?v=5';
 import {
   NUTRIENT_FIELDS, searchUsda, searchLocalFoods, searchFavorites,
   cacheUsdaFood, addCustomFood, logFood, deleteFoodLog
-} from './foods.js';
-import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js';
-import { buildReportText, downloadText } from './report.js';
+} from './foods.js?v=5';
+import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=5';
+import { buildReportText, downloadText } from './report.js?v=5';
 
 /* ================= utilidades de hora ================= */
 
@@ -187,6 +187,20 @@ function showToast(msg){
   toastEl.classList.add('show');
   setTimeout(() => toastEl.classList.remove('show'), 1600);
 }
+function showError(msg){
+  let b = document.getElementById('errBanner');
+  if(!b){
+    b = document.createElement('div');
+    b.id = 'errBanner';
+    b.style.cssText = 'position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top) + 8px);z-index:999;background:#5a1d1d;color:#fff;padding:12px 14px;border-radius:12px;font:13px/1.4 system-ui;word-break:break-word';
+    b.addEventListener('click', () => b.remove());
+    document.body.appendChild(b);
+  }
+  b.textContent = msg + ' (toca para cerrar)';
+}
+window.addEventListener('error', e => showError('Error: ' + e.message));
+window.addEventListener('unhandledrejection', e => showError('Error: ' + ((e.reason && e.reason.message) || e.reason)));
+
 function escapeHtml(str){
   const div = document.createElement('div');
   div.textContent = str == null ? '' : String(str);
@@ -295,16 +309,16 @@ onAuthChange(handleSession);
 
 async function bootApp(){
   todayDateEl.textContent = new Date().toLocaleDateString('es-VE', { weekday:'short', day:'numeric', month:'short' });
+  renderQuickGrid();
   try{
     await ensureProfile(user);
     profile = await getMyProfile(user.id);
   }catch(err){
-    showToast('Error cargando perfil: ' + err.message);
+    showError('Error cargando perfil: ' + (err.message || err));
     return;
   }
   document.getElementById('displayNameInput').value = profile.display_name;
   fillGoalInputs();
-  renderQuickGrid();
   await Promise.all([renderFavorites(), renderToday(), renderStats(), renderRanking()]);
   renderHistoryPlaceholder();
 }

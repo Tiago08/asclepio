@@ -1,4 +1,4 @@
-import { NUTRIENT_FIELDS } from './foods.js';
+import { NUTRIENT_FIELDS } from './foods.js?v=5';
 
 function fmtNum(v){
   if(v === null || v === undefined) return '—';
