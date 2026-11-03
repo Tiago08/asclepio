@@ -46,6 +46,51 @@ function emptyNutrients() {
   return o;
 }
 
+/* ---- traducción EN -> ES de resultados de USDA ---- */
+/* MyMemory es gratis y no pide API key; cacheamos en localStorage
+   para no volver a traducir lo mismo en cada búsqueda. */
+
+const TRANSLATE_CACHE_KEY = 'asclepio_translate_cache_v1';
+const translateCache = new Map();
+try {
+  const raw = localStorage.getItem(TRANSLATE_CACHE_KEY);
+  if (raw) JSON.parse(raw).forEach(([k, v]) => translateCache.set(k, v));
+} catch (e) { /* localStorage no disponible, seguimos sin cache persistente */ }
+
+function saveTranslateCache() {
+  try {
+    const entries = [...translateCache.entries()].slice(-500); // evita crecer sin límite
+    localStorage.setItem(TRANSLATE_CACHE_KEY, JSON.stringify(entries));
+  } catch (e) { /* no crítico */ }
+}
+
+function toSentenceCase(str) {
+  if (!str) return str;
+  const lower = str.toLowerCase();
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
+}
+
+async function translateToSpanish(text, email) {
+  if (!text) return text;
+  const key = text.trim().toLowerCase();
+  if (translateCache.has(key)) return translateCache.get(key);
+  try {
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|es`
+      + (email ? `&de=${encodeURIComponent(email)}` : '');
+    const res = await fetch(url);
+    if (!res.ok) return text;
+    const json = await res.json();
+    const translated = json?.responseData?.translatedText;
+    if (translated && typeof translated === 'string' && !translated.toUpperCase().includes('QUERY LENGTH LIMIT')) {
+      const clean = toSentenceCase(translated.trim());
+      translateCache.set(key, clean);
+      saveTranslateCache();
+      return clean;
+    }
+  } catch (e) { /* si falla la traducción, mostramos el nombre en inglés */ }
+  return text;
+}
+
 function usdaFoodToRow(food) {
   const row = emptyNutrients();
   (food.foodNutrients || []).forEach(n => {
@@ -67,7 +112,7 @@ function usdaFoodToRow(food) {
   };
 }
 
-export async function searchUsda(query) {
+export async function searchUsda(query, userEmail) {
   if (!query || query.trim().length < 2) return [];
   const url = new URL('https://api.nal.usda.gov/fdc/v1/foods/search');
   url.searchParams.set('api_key', USDA_API_KEY);
@@ -78,7 +123,15 @@ export async function searchUsda(query) {
   const res = await fetch(url.toString());
   if (!res.ok) throw new Error('USDA search failed: ' + res.status);
   const json = await res.json();
-  return (json.foods || []).map(usdaFoodToRow);
+  const rows = (json.foods || []).map(usdaFoodToRow);
+
+  // traduce los nombres (y la categoría) en paralelo; si una falla, se queda en inglés
+  await Promise.all(rows.map(async (r) => {
+    r.name = await translateToSpanish(r.name, userEmail);
+    if (r.category) r.category = await translateToSpanish(r.category, userEmail);
+  }));
+
+  return rows;
 }
 
 export async function searchLocalFoods(query) {

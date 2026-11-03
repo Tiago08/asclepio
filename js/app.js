@@ -369,7 +369,7 @@ async function runFoodSearch(query, resultsWrap){
   try{
     [local, usda] = await Promise.all([
       searchLocalFoods(query).catch(() => []),
-      searchUsda(query).catch(() => [])
+      searchUsda(query, user.email).catch(() => [])
     ]);
   }catch(err){ /* ya atrapado arriba */ }
 
@@ -384,7 +384,7 @@ async function runFoodSearch(query, resultsWrap){
   }
   resultsWrap.innerHTML = `<div class="food-search-results">${all.map((f, i) => `
     <div class="food-result" data-idx="${i}">
-      <div class="fr-name">${escapeHtml(f.name)}<span class="fr-src ${f.source}">${f.source === 'usda' ? 'USDA' : 'propio'}</span></div>
+      <div class="fr-name">${escapeHtml(f.name)}</div>
       <div class="fr-meta">${f.kcal != null ? f.kcal + ' kcal' : 'sin kcal'} · ${escapeHtml(f.serving_label)}${f.brand ? ' · ' + escapeHtml(f.brand) : ''}</div>
     </div>`).join('')}</div>`;
 
@@ -622,16 +622,11 @@ async function renderRanking(){
   }
 }
 
-/* ================= rings de macros ================= */
+/* ================= tarjeta de hoy: calorías + macros ================= */
 
-function ringSVG(pct, color){
-  const r = 20, c = 2 * Math.PI * r;
-  const p = Math.max(0, Math.min(1, pct));
-  return `<svg width="48" height="48" viewBox="0 0 48 48">
-    <circle cx="24" cy="24" r="${r}" fill="none" stroke="var(--border)" stroke-width="5"/>
-    <circle cx="24" cy="24" r="${r}" fill="none" stroke="${color}" stroke-width="5"
-      stroke-dasharray="${p*c} ${c}" stroke-linecap="round"/>
-  </svg>`;
+function pctWidth(value, goal){
+  if(!goal) return '0%';
+  return Math.max(0, Math.min(100, (value / goal) * 100)) + '%';
 }
 
 function renderRings(foodEntries){
@@ -641,18 +636,28 @@ function renderRings(foodEntries){
     const d = e.data;
     ['kcal','protein_g','carbs_g','fat_g'].forEach(k => { if(d[k] != null) totals[k] += Number(d[k]); });
   });
-  const specs = [
-    { key:'kcal', label:'kcal', color:'var(--c-energia)', goal: profile.goal_kcal },
-    { key:'protein_g', label:'proteína', color:'var(--c-gym)', goal: profile.goal_protein_g },
-    { key:'carbs_g', label:'carbos', color:'var(--c-comida)', goal: profile.goal_carbs_g },
-    { key:'fat_g', label:'grasa', color:'var(--c-sueno)', goal: profile.goal_fat_g }
+  const left = Math.max(0, Math.round(profile.goal_kcal - totals.kcal));
+  const macros = [
+    { key:'carbs_g', label:'Carbos', color:'var(--c-comida)', goal: profile.goal_carbs_g },
+    { key:'protein_g', label:'Proteína', color:'var(--c-gym)', goal: profile.goal_protein_g },
+    { key:'fat_g', label:'Grasa', color:'var(--c-sueno)', goal: profile.goal_fat_g }
   ];
-  ringRow.innerHTML = specs.map(s => `
-    <div class="ring">
-      ${ringSVG(totals[s.key] / s.goal, s.color)}
-      <div class="rvalue mono">${Math.round(totals[s.key])}</div>
-      <div class="rlabel">${s.label}</div>
-    </div>`).join('');
+
+  ringRow.innerHTML = `
+    <div class="today-card">
+      <div class="kh-top">
+        <span class="kh-label">Calorías</span>
+        <span class="kh-num"><b>${Math.round(totals.kcal)}</b> / ${Math.round(profile.goal_kcal)} · ${left} restantes</span>
+      </div>
+      <div class="kh-bar"><div class="kh-bar-fill" style="width:${pctWidth(totals.kcal, profile.goal_kcal)}"></div></div>
+      <div class="macro-row">
+        ${macros.map(m => `
+          <div class="macro-item">
+            <div class="macro-top"><span>${m.label}</span><b>${Math.round(totals[m.key])}g</b></div>
+            <div class="macro-bar"><div class="macro-bar-fill" style="width:${pctWidth(totals[m.key], m.goal)}; background:${m.color};"></div></div>
+          </div>`).join('')}
+      </div>
+    </div>`;
 }
 
 /* ================= stats + insights ================= */
