@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Asclepio</title>
+<meta name="theme-color" content="#14171c">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div class="login-screen" id="loginScreen">
+  <div class="login-mark">ASCLEPIO</div>
+  <h1 class="login-title">Tu bitácora de salud</h1>
+  <p class="login-sub">Entra con tu correo. Te mandamos un link, sin contraseña.</p>
+  <input type="email" id="loginEmail" placeholder="tucorreo@ejemplo.com" autocomplete="email">
+  <button class="btn-primary" id="loginBtn" style="width:100%; display:block;">Enviar link de acceso</button>
+  <div class="login-status" id="loginStatus"></div>
+</div>
+
+<!-- ============ APP ============ -->
+<div class="shell hidden" id="appShell">
+  <header>
+    <div class="header-row">
+      <div class="wordmark">ASCLEPIO</div>
+      <div class="header-right">
+        <span class="today-date mono" id="todayDate"></span>
+        <button class="logout-btn" id="logoutBtn">salir</button>
+      </div>
+    </div>
+    <div class="stat-strip" id="statStrip"></div>
+    <div class="ring-row" id="ringRow"></div>
+  </header>
+
+  <div id="insightArea"></div>
+
+  <div class="favorites-row" id="favoritesRow"></div>
+  <div class="quick-grid" id="quickGrid"></div>
+  <div id="formArea"></div>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="hoy">Hoy</button>
+    <button class="tab-btn" data-tab="historial">Historial</button>
+    <button class="tab-btn" data-tab="ranking">Ranking</button>
+    <button class="tab-btn" data-tab="datos">Datos</button>
+  </div>
+
+  <div class="panel active" id="panel-hoy">
+    <div id="todayTimeline"></div>
+  </div>
+
+  <div class="panel" id="panel-historial">
+    <div id="historyList"></div>
+  </div>
+
+  <div class="panel" id="panel-ranking">
+    <div id="rankingList"></div>
+  </div>
+
+  <div class="panel" id="panel-datos">
+    <div class="stat-grid" id="fullStats"></div>
+    <div class="data-card">
+      <h4>Tu perfil</h4>
+      <p>Así te ven los demás en el ranking.</p>
+      <div class="field"><label>Nombre</label><input type="text" id="displayNameInput"></div>
+      <button class="btn-ghost" id="saveNameBtn">Guardar nombre</button>
+    </div>
+    <div class="data-card">
+      <h4>Reporte</h4>
+      <p>Genera un resumen de texto de tu día o semana — pásamelo para que te diga qué ajustar.</p>
+      <select id="reportRange">
+        <option value="today">Hoy</option>
+        <option value="week">Últimos 7 días</option>
+      </select>
+      <button class="btn-primary" id="reportBtn" style="--cat-color: var(--accent)">Generar y descargar reporte</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
