@@ -22,7 +22,7 @@ Estado y pendientes: página "Asclepio" en Notion (https://app.notion.com/p/40d4
 
 ## Reglas de trabajo
 
-- Cache-busting: los imports y el CSS llevan `?v=N` (ahora `?v=5`). Cada vez que cambies archivos, sube N en todos los imports, en `index.html` y en `supabaseClient.js`. Si no, Chrome y la app instalada muestran archivos viejos.
+- Cache-busting: los imports y el CSS llevan `?v=N` (ahora `?v=6`). Cada vez que cambies archivos, sube N en todos los imports, en `index.html` y en `supabaseClient.js`. Si no, Chrome y la app instalada muestran archivos viejos.
 - Todo el texto visible va en español.
 - Los cambios de base de datos van siempre en un archivo nuevo en `sql/`, idempotente (`if not exists`, `on conflict`, etc.). Nunca edites el esquema ya ejecutado. Al terminar, di a Santiago qué archivo ejecutar y en qué orden.
 - Tablas creadas por SQL necesitan `GRANT` a `authenticated` además de las políticas RLS (ya nos mordió: "permission denied for table").
@@ -52,6 +52,4 @@ Para la base de datos, probar el SQL en un Postgres local antes de entregarlo.
 
 ## Pendientes de la fase actual (esperan orden)
 
-- Quitar el texto "Propio/USDA" en los resultados de búsqueda.
-- Traducir al español los nombres que vienen de USDA.
-- Zoom al tocar campos en iPhone (subir letra a 16 px).
+- Ninguno por ahora.

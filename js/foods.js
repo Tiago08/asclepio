@@ -1,5 +1,5 @@
-import { supabase } from './supabaseClient.js?v=5';
-import { USDA_API_KEY } from './config.js?v=5';
+import { supabase } from './supabaseClient.js?v=6';
+import { USDA_API_KEY } from './config.js?v=6';
 
 // Campos nutricionales que manejamos en toda la app, en el orden
 // en que se muestran. Un solo lugar para no desincronizar listas.
@@ -50,7 +50,9 @@ function emptyNutrients() {
 /* MyMemory es gratis y no pide API key; cacheamos en localStorage
    para no volver a traducir lo mismo en cada búsqueda. */
 
-const TRANSLATE_CACHE_KEY = 'asclepio_translate_cache_v1';
+// v2: la v1 pudo guardar traducciones malas de nombres en MAYÚSCULAS; se descarta
+const TRANSLATE_CACHE_KEY = 'asclepio_translate_cache_v2';
+try { localStorage.removeItem('asclepio_translate_cache_v1'); } catch (e) { /* no crítico */ }
 const translateCache = new Map();
 try {
   const raw = localStorage.getItem(TRANSLATE_CACHE_KEY);
@@ -70,25 +72,50 @@ function toSentenceCase(str) {
   return lower.charAt(0).toUpperCase() + lower.slice(1);
 }
 
+// Si MyMemory dice que se acabó la cuota diaria, dejamos de llamarlo
+// hasta recargar la app (cada llamada extra solo gasta tiempo).
+let translateQuotaExhausted = false;
+// Peticiones en curso: si 7 resultados se llaman "RICE", se traduce una sola vez.
+const translateInFlight = new Map();
+
 async function translateToSpanish(text, email) {
   if (!text) return text;
   const key = text.trim().toLowerCase();
   if (translateCache.has(key)) return translateCache.get(key);
-  try {
-    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|es`
-      + (email ? `&de=${encodeURIComponent(email)}` : '');
-    const res = await fetch(url);
-    if (!res.ok) return text;
-    const json = await res.json();
-    const translated = json?.responseData?.translatedText;
-    if (translated && typeof translated === 'string' && !translated.toUpperCase().includes('QUERY LENGTH LIMIT')) {
-      const clean = toSentenceCase(translated.trim());
-      translateCache.set(key, clean);
-      saveTranslateCache();
-      return clean;
-    }
-  } catch (e) { /* si falla la traducción, mostramos el nombre en inglés */ }
-  return text;
+  // Si no se puede traducir, al menos no mostramos el nombre en MAYÚSCULAS.
+  const fallback = toSentenceCase(text.trim());
+  if (translateQuotaExhausted) return fallback;
+  if (translateInFlight.has(key)) return translateInFlight.get(key);
+
+  const job = (async () => {
+    try {
+      // Mandamos el texto en minúsculas: en MAYÚSCULAS ("RICE") MyMemory
+      // devuelve a veces traducciones absurdas ("Crudo").
+      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(fallback)}&langpair=en|es`
+        + (email ? `&de=${encodeURIComponent(email)}` : '');
+      const res = await fetch(url);
+      if (!res.ok) return fallback;
+      const json = await res.json();
+      const status = Number(json?.responseStatus);
+      const translated = json?.responseData?.translatedText;
+      const upper = typeof translated === 'string' ? translated.toUpperCase() : '';
+      // MyMemory avisa de la cuota con HTTP 200 y el aviso como "traducción".
+      if (status === 429 || upper.includes('MYMEMORY WARNING') || upper.includes('USED ALL AVAILABLE')) {
+        translateQuotaExhausted = true;
+        return fallback;
+      }
+      if (status === 200 && translated && !upper.includes('QUERY LENGTH LIMIT')) {
+        const clean = toSentenceCase(translated.trim());
+        translateCache.set(key, clean);
+        saveTranslateCache();
+        return clean;
+      }
+    } catch (e) { /* si falla la traducción, mostramos el nombre en inglés */ }
+    return fallback;
+  })();
+
+  translateInFlight.set(key, job);
+  try { return await job; } finally { translateInFlight.delete(key); }
 }
 
 function usdaFoodToRow(food) {

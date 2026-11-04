@@ -1,14 +1,14 @@
-import { supabase } from './supabaseClient.js?v=5';
+import { supabase } from './supabaseClient.js?v=6';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js?v=5';
+} from './auth.js?v=6';
 import {
   NUTRIENT_FIELDS, searchUsda, searchLocalFoods, searchFavorites,
   cacheUsdaFood, addCustomFood, logFood, deleteFoodLog
-} from './foods.js?v=5';
-import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=5';
-import { buildReportText, downloadText } from './report.js?v=5';
+} from './foods.js?v=6';
+import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=6';
+import { buildReportText, downloadText } from './report.js?v=6';
 
 /* ================= utilidades de hora ================= */
 
