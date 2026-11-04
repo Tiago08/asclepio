@@ -55,6 +55,19 @@ input, select, textarea{ font-size: 16px; }
   padding-right: max(22px, env(safe-area-inset-right));
 }
 
+/* ---------- pantalla de carga ---------- */
+.boot-screen{
+  min-height: 100dvh;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+  padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
+}
+.boot-logo{ border-radius: 18px; animation: boot-pulse 1.4s ease-in-out infinite; }
+.boot-label{ font-size: 13px; color: var(--text-faint); letter-spacing: 0.08em; }
+@keyframes boot-pulse{
+  0%, 100%{ transform: scale(1); opacity: 0.75; }
+  50%{ transform: scale(1.08); opacity: 1; }
+}
+
 /* ---------- login ---------- */
 .login-screen{
   min-height: 100dvh;

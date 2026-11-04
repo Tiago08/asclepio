@@ -15,12 +15,30 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/styles.css?v=6">
+<link rel="stylesheet" href="css/styles.css?v=7">
+<!-- Precarga en paralelo: sin esto el navegador descubre cada módulo
+     solo después de bajar el anterior (una cascada en serie). -->
+<link rel="modulepreload" href="https://esm.sh/@supabase/supabase-js@2.119.0/es2022/supabase-js.bundle.mjs" crossorigin>
+<link rel="modulepreload" href="js/app.js?v=7">
+<link rel="modulepreload" href="js/supabaseClient.js?v=7">
+<link rel="modulepreload" href="js/config.js?v=7">
+<link rel="modulepreload" href="js/auth.js?v=7">
+<link rel="modulepreload" href="js/foods.js?v=7">
+<link rel="modulepreload" href="js/foodDict.js?v=7">
+<link rel="modulepreload" href="js/activity.js?v=7">
+<link rel="modulepreload" href="js/report.js?v=7">
 </head>
 <body>
 
+<!-- ============ CARGA ============ -->
+<!-- Se ve mientras se verifica la sesión; nunca se muestra el login a quien ya entró. -->
+<div class="boot-screen" id="bootScreen" role="status" aria-live="polite">
+  <img class="boot-logo" src="icons/favicon.svg" alt="" width="72" height="72">
+  <div class="boot-label">Cargando…</div>
+</div>
+
 <!-- ============ LOGIN ============ -->
-<div class="login-screen" id="loginScreen">
+<div class="login-screen hidden" id="loginScreen">
   <div class="login-mark">ASCLEPIO</div>
   <h1 class="login-title">Tu bitácora de salud</h1>
   <p class="login-sub" id="loginSub">Entra con tu correo. Te mandamos un código, sin contraseña.</p>
@@ -119,6 +137,19 @@
 
 <div class="toast" id="toast"></div>
 
-<script type="module" src="js/app.js?v=6"></script>
+<script>
+  // Chequeo instantáneo, antes de que cargue Supabase: si no hay token
+  // guardado, no hay nada que verificar y mostramos el correo de una vez.
+  // La clave depende del proyecto: "sb-<ref>-auth-token" (ver SUPABASE_URL en js/config.js).
+  (function(){
+    var hasToken = false;
+    try { hasToken = !!localStorage.getItem('sb-tzoccyztblmpoprghjbj-auth-token'); } catch (e) {}
+    if (!hasToken) {
+      document.getElementById('bootScreen').classList.add('hidden');
+      document.getElementById('loginScreen').classList.remove('hidden');
+    }
+  })();
+</script>
+<script type="module" src="js/app.js?v=7"></script>
 </body>
 </html>

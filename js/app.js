@@ -1,14 +1,14 @@
-import { supabase } from './supabaseClient.js?v=6';
+import { supabase } from './supabaseClient.js?v=7';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js?v=6';
+} from './auth.js?v=7';
 import {
   NUTRIENT_FIELDS, searchUsda, searchLocalFoods, searchFavorites,
-  cacheUsdaFood, addCustomFood, logFood, deleteFoodLog
-} from './foods.js?v=6';
-import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=6';
-import { buildReportText, downloadText } from './report.js?v=6';
+  cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, rankFoods, pickForDisplay, translateToSpanish
+} from './foods.js?v=7';
+import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=7';
+import { buildReportText, downloadText } from './report.js?v=7';
 
 /* ================= utilidades de hora ================= */
 
@@ -159,6 +159,7 @@ let bootedFor = null;   // evita repetir el arranque cuando Supabase refresca el
 
 /* ================= DOM refs ================= */
 
+const bootScreen = document.getElementById('bootScreen');
 const loginScreen = document.getElementById('loginScreen');
 const appShell = document.getElementById('appShell');
 const tabBar = document.getElementById('tabBar');
@@ -287,6 +288,7 @@ async function handleSession(s){
     user = s.user;
     if(bootedFor === user.id) return;
     bootedFor = user.id;
+    bootScreen.classList.add('hidden');
     loginScreen.classList.add('hidden');
     appShell.classList.remove('hidden');
     tabBar.classList.remove('hidden');
@@ -294,6 +296,7 @@ async function handleSession(s){
   }else{
     user = null; profile = null; bootedFor = null;
     closeForm();
+    bootScreen.classList.add('hidden');
     appShell.classList.add('hidden');
     tabBar.classList.add('hidden');
     loginScreen.classList.remove('hidden');
@@ -347,9 +350,14 @@ function renderQuickGrid(){
 
 /* ================= favoritos (1-toque) ================= */
 
+// ids de alimentos que el usuario ya registró: suben en la búsqueda
+let usedFoodIds = new Set();
+
 async function renderFavorites(){
   try{
-    const favs = await searchFavorites(user.id, 6);
+    const used = await searchFavorites(user.id, 30);
+    usedFoodIds = new Set(used.map(f => f.id));
+    const favs = used.slice(0, 6);
     if(favs.length === 0){ favoritesRow.innerHTML = ''; return; }
     favoritesRow.innerHTML = favs.map(f => `<button class="fav-chip" data-fav="${f.id}">${escapeHtml(f.name)}</button>`).join('');
     favoritesRow.querySelectorAll('[data-fav]').forEach(btn => {
@@ -559,40 +567,70 @@ function openFoodForm(){
   input.addEventListener('input', () => {
     clearTimeout(debounceTimer);
     const q = input.value.trim();
-    if(q.length < 2){ resultsWrap.innerHTML = ''; return; }
-    debounceTimer = setTimeout(() => runFoodSearch(q, resultsWrap), 350);
+    if(q.length < 2){ foodSearchSeq++; resultsWrap.innerHTML = ''; return; }
+    debounceTimer = setTimeout(() => runFoodSearch(q, resultsWrap), 300);
   });
 
   input.focus();
 }
 
+// Cada búsqueda lleva un número; si llega la respuesta de una búsqueda vieja
+// (el usuario ya escribió otra cosa), se descarta para no pisar la nueva.
+let foodSearchSeq = 0;
+const MAX_FOOD_RESULTS = 20;
+
+function renderFoodResults(list, resultsWrap, { loadingMore = false } = {}){
+  const items = pickForDisplay(list, MAX_FOOD_RESULTS);
+  resultsWrap.innerHTML = `<div class="food-search-results">${items.map((f, i) => `
+    <div class="food-result" data-idx="${i}">
+      <div class="fr-name">${escapeHtml(f.name)}</div>
+      <div class="fr-meta">${f.brand ? escapeHtml(f.brand) + ' · ' : ''}${f.kcal != null ? Math.round(f.kcal) + ' kcal' : 'sin kcal'} · ${escapeHtml(f.serving_label)}</div>
+    </div>`).join('')}</div>`
+    + (loadingMore ? `<div class="search-empty"><span class="spinner"></span> buscando más en USDA...</div>` : '');
+  resultsWrap.querySelectorAll('[data-idx]').forEach(el => {
+    el.addEventListener('click', () => openQuantityStep(items[Number(el.dataset.idx)]));
+  });
+  return items;
+}
+
 async function runFoodSearch(query, resultsWrap){
+  const seq = ++foodSearchSeq;
+  const isCurrent = () => seq === foodSearchSeq && resultsWrap.isConnected;
   resultsWrap.innerHTML = `<div class="search-empty"><span class="spinner"></span> buscando...</div>`;
-  let local = [], usda = [];
-  try{
-    [local, usda] = await Promise.all([
-      searchLocalFoods(query).catch(() => []),
-      searchUsda(query, user.email).catch(() => [])
-    ]);
-  }catch(err){ /* ya atrapado arriba */ }
 
-  // evita duplicar un alimento local que ya es copia cacheada de un fdcId que también salió en USDA
+  const localP = searchLocalFoods(query).catch(() => []);
+  const usdaP = searchUsda(query, user.email).catch(() => ({ rows: [], enQuery: '' }));
+
+  // 1) Lo local (tus alimentos) llega rápido: se muestra ya, sin esperar a USDA.
+  const local = await localP;
+  if(!isCurrent()) return;
+  if(local.length) renderFoodResults(rankFoods(local, query, '', usedFoodIds), resultsWrap, { loadingMore: true });
+
+  // 2) Llega USDA: se junta todo y se ordena por relevancia.
+  const { rows: usdaRows, enQuery } = await usdaP;
+  if(!isCurrent()) return;
+  // evita duplicar un alimento local que ya es copia guardada del mismo fdcId de USDA
   const cachedFdcIds = new Set(local.filter(f => f.source === 'usda').map(f => f.usda_fdc_id));
-  usda = usda.filter(f => !cachedFdcIds.has(f.usda_fdc_id));
+  const usda = usdaRows.filter(f => !cachedFdcIds.has(f.usda_fdc_id));
 
-  const all = [...local, ...usda];
+  const all = rankFoods([...local, ...usda], query, enQuery, usedFoodIds);
   if(all.length === 0){
     resultsWrap.innerHTML = `<div class="search-empty">Sin resultados. Puedes agregarlo como alimento nuevo.</div>`;
     return;
   }
-  resultsWrap.innerHTML = `<div class="food-search-results">${all.map((f, i) => `
-    <div class="food-result" data-idx="${i}">
-      <div class="fr-name">${escapeHtml(f.name)}</div>
-      <div class="fr-meta">${f.kcal != null ? f.kcal + ' kcal' : 'sin kcal'} · ${escapeHtml(f.serving_label)}${f.brand ? ' · ' + escapeHtml(f.brand) : ''}</div>
-    </div>`).join('')}</div>`;
+  const shown = renderFoodResults(all, resultsWrap);
 
-  resultsWrap.querySelectorAll('[data-idx]').forEach(el => {
-    el.addEventListener('click', () => openQuantityStep(all[Number(el.dataset.idx)]));
+  // 3) Los nombres que no estaban en caché se traducen y se cambian en su sitio.
+  const nameEls = resultsWrap.querySelectorAll('.fr-name');
+  shown.forEach((f, i) => {
+    if(!f._needsTr) return;
+    const before = f.name;
+    translateToSpanish(f._en, user.email).then(es => {
+      if(es === before) return; // no se pudo traducir (sin cuota o sin red)
+      f.name = es;
+      f._needsTr = false;
+      if(isCurrent() && nameEls[i]) nameEls[i].textContent = es;
+    });
   });
 }
 
@@ -639,7 +677,7 @@ async function openQuantityStep(foodResult){
     try{
       let foodRow = foodResult;
       if(foodResult.source === 'usda' && !foodResult.id){
-        foodRow = await cacheUsdaFood(foodResult, user.id);
+        foodRow = await cacheUsdaFood(foodResult, user.id, user.email);
       }
       const qty = Number(card.querySelector('#f_qty').value) || 1;
       const fecha = card.querySelector('#f_fecha').value || todayStr();
@@ -990,5 +1028,8 @@ document.getElementById('reportBtn').addEventListener('click', async () => {
 /* ================= arranque ================= */
 
 (async function init(){
-  await handleSession(await getSession());
+  let s = null;
+  try{ s = await getSession(); }
+  catch(err){ /* sin red o token inválido: mejor el login que la pantalla de carga eterna */ }
+  await handleSession(s);
 })();

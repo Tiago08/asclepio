@@ -1,5 +1,6 @@
-import { supabase } from './supabaseClient.js?v=6';
-import { USDA_API_KEY } from './config.js?v=6';
+import { supabase } from './supabaseClient.js?v=7';
+import { USDA_API_KEY } from './config.js?v=7';
+import { dictQueryToEnglish, normalizeText } from './foodDict.js?v=7';
 
 // Campos nutricionales que manejamos en toda la app, en el orden
 // en que se muestran. Un solo lugar para no desincronizar listas.
@@ -24,6 +25,8 @@ export const NUTRIENT_FIELDS = [
 // nutrientNumber (USDA, estable entre bases) -> nuestro campo
 const USDA_NUTRIENT_MAP = {
   '208': 'kcal', '1008': 'kcal',
+  // los alimentos "Foundation" traen la energía solo con factores Atwater
+  '957': 'kcal', '958': 'kcal', '2047': 'kcal', '2048': 'kcal',
   '205': 'carbs_g', '1005': 'carbs_g',
   '269': 'sugars_g', '1063': 'sugars_g',
   '203': 'protein_g', '1003': 'protein_g',
@@ -46,9 +49,8 @@ function emptyNutrients() {
   return o;
 }
 
-/* ---- traducción EN -> ES de resultados de USDA ---- */
-/* MyMemory es gratis y no pide API key; cacheamos en localStorage
-   para no volver a traducir lo mismo en cada búsqueda. */
+/* ---- traducción con MyMemory (gratis, sin API key) ---- */
+/* Cacheamos en localStorage para no volver a traducir lo mismo. */
 
 // v2: la v1 pudo guardar traducciones malas de nombres en MAYÚSCULAS; se descarta
 const TRANSLATE_CACHE_KEY = 'asclepio_translate_cache_v2';
@@ -61,7 +63,7 @@ try {
 
 function saveTranslateCache() {
   try {
-    const entries = [...translateCache.entries()].slice(-500); // evita crecer sin límite
+    const entries = [...translateCache.entries()].slice(-800); // evita crecer sin límite
     localStorage.setItem(TRANSLATE_CACHE_KEY, JSON.stringify(entries));
   } catch (e) { /* no crítico */ }
 }
@@ -78,44 +80,99 @@ let translateQuotaExhausted = false;
 // Peticiones en curso: si 7 resultados se llaman "RICE", se traduce una sola vez.
 const translateInFlight = new Map();
 
-async function translateToSpanish(text, email) {
+/** Una llamada a MyMemory. Devuelve el texto traducido o null. */
+async function myMemory(text, pair, email) {
+  if (translateQuotaExhausted) return null;
+  try {
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${pair}`
+      + (email ? `&de=${encodeURIComponent(email)}` : '');
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const json = await res.json();
+    const status = Number(json?.responseStatus);
+    const translated = json?.responseData?.translatedText;
+    const upper = typeof translated === 'string' ? translated.toUpperCase() : '';
+    // MyMemory avisa de la cuota con HTTP 200 y el aviso como "traducción".
+    if (status === 429 || upper.includes('MYMEMORY WARNING') || upper.includes('USED ALL AVAILABLE')) {
+      translateQuotaExhausted = true;
+      return null;
+    }
+    if (status === 200 && translated && !upper.includes('QUERY LENGTH LIMIT')) return translated.trim();
+  } catch (e) { /* sin red: seguimos sin traducir */ }
+  return null;
+}
+
+/** Traducción EN -> ES ya guardada, sin llamar a la red (o null). */
+export function cachedSpanish(text) {
+  if (!text) return null;
+  return translateCache.get(text.trim().toLowerCase()) ?? null;
+}
+
+/** Traduce un nombre EN -> ES. Si no se puede, lo devuelve sin MAYÚSCULAS. */
+export async function translateToSpanish(text, email) {
   if (!text) return text;
   const key = text.trim().toLowerCase();
   if (translateCache.has(key)) return translateCache.get(key);
-  // Si no se puede traducir, al menos no mostramos el nombre en MAYÚSCULAS.
   const fallback = toSentenceCase(text.trim());
-  if (translateQuotaExhausted) return fallback;
   if (translateInFlight.has(key)) return translateInFlight.get(key);
 
-  const job = (async () => {
-    try {
-      // Mandamos el texto en minúsculas: en MAYÚSCULAS ("RICE") MyMemory
-      // devuelve a veces traducciones absurdas ("Crudo").
-      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(fallback)}&langpair=en|es`
-        + (email ? `&de=${encodeURIComponent(email)}` : '');
-      const res = await fetch(url);
-      if (!res.ok) return fallback;
-      const json = await res.json();
-      const status = Number(json?.responseStatus);
-      const translated = json?.responseData?.translatedText;
-      const upper = typeof translated === 'string' ? translated.toUpperCase() : '';
-      // MyMemory avisa de la cuota con HTTP 200 y el aviso como "traducción".
-      if (status === 429 || upper.includes('MYMEMORY WARNING') || upper.includes('USED ALL AVAILABLE')) {
-        translateQuotaExhausted = true;
-        return fallback;
-      }
-      if (status === 200 && translated && !upper.includes('QUERY LENGTH LIMIT')) {
-        const clean = toSentenceCase(translated.trim());
-        translateCache.set(key, clean);
-        saveTranslateCache();
-        return clean;
-      }
-    } catch (e) { /* si falla la traducción, mostramos el nombre en inglés */ }
-    return fallback;
-  })();
-
+  // Mandamos el texto en minúsculas: en MAYÚSCULAS ("RICE") MyMemory
+  // devuelve a veces traducciones absurdas ("Crudo").
+  const job = myMemory(fallback, 'en|es', email).then(t => {
+    if (!t) return fallback;
+    const clean = toSentenceCase(t);
+    translateCache.set(key, clean);
+    saveTranslateCache();
+    return clean;
+  });
   translateInFlight.set(key, job);
   try { return await job; } finally { translateInFlight.delete(key); }
+}
+
+/** Lo que el usuario escribió (español) -> búsqueda en inglés para USDA. */
+async function queryToEnglish(query, email) {
+  const fromDict = dictQueryToEnglish(query);
+  if (fromDict) return fromDict;
+  const key = 'es>en:' + normalizeText(query);
+  if (translateCache.has(key)) return translateCache.get(key);
+  const t = await myMemory(query.trim().toLowerCase(), 'es|en', email);
+  if (!t) return query;
+  const en = t.toLowerCase();
+  translateCache.set(key, en);
+  saveTranslateCache();
+  return en;
+}
+
+/* ---- limpieza de nombres de USDA ---- */
+
+// Prefijos de categoría que estorban: "Restaurant, Latino, arroz con leche"
+const NAME_PREFIXES = /^(restaurant|restaurants|fast foods?)\s*,\s*((latino|chinese|mexican|italian|japanese|family style|thai|greek)\s*,\s*)?/i;
+
+function removePhrase(text, phrase) {
+  if (!phrase || phrase.length < 2) return text;
+  const esc = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const out = text.replace(new RegExp(`(^|[\\s,])${esc}(?=$|[\\s,])`, 'ig'), ' ');
+  return out.replace(/\s*,\s*,/g, ',').replace(/^[\s,]+|[\s,]+$/g, '').replace(/\s{2,}/g, ' ');
+}
+
+/** Quita prefijos de categoría, paréntesis y (en productos de marca) la marca del nombre. */
+function cleanUsdaName(food) {
+  let name = String(food.description || '').trim();
+  name = name.replace(NAME_PREFIXES, '');
+  name = name.replace(/\s*\([^)]*\)/g, '').trim(); // "(rice pudding)", "(Includes foods for...)"
+  if (food.dataType === 'Branded') {
+    for (const brand of [food.brandName, food.brandOwner]) {
+      const without = removePhrase(name, brand);
+      if (without.length >= 3) name = without;
+    }
+    // Las marcas repiten trozos: "ARROZ CASERO, ARROZ" -> "ARROZ CASERO"
+    const kept = [];
+    for (const seg of name.split(',').map(x => x.trim()).filter(Boolean)) {
+      if (!normalizeText(kept.join(' ')).includes(normalizeText(seg))) kept.push(seg);
+    }
+    if (kept.length) name = kept.join(', ');
+  }
+  return name || String(food.description || '');
 }
 
 function usdaFoodToRow(food) {
@@ -127,38 +184,139 @@ function usdaFoodToRow(food) {
       row[field] = typeof n.value === 'number' ? n.value : (n.amount ?? null);
     }
   });
+  const nameEn = cleanUsdaName(food);
+  const cached = cachedSpanish(nameEn);
+  const brand = food.brandName || food.brandOwner || null; // la marca, no la corporación
   return {
     source: 'usda',
     usda_fdc_id: String(food.fdcId),
-    name: food.description,
-    brand: food.brandOwner || food.brandName || null,
+    name: cached || toSentenceCase(nameEn),
+    brand: brand ? toSentenceCase(brand) : null,
     category: food.foodCategory || null,
     serving_label: '100 g',
     serving_grams: 100,
-    ...row
+    ...row,
+    // campos internos (empiezan por "_"): no se guardan en la base de datos
+    _en: nameEn,
+    _kind: food.dataType === 'Branded' ? 'branded' : 'generic',
+    _needsTr: !cached
   };
 }
 
-export async function searchUsda(query, userEmail) {
-  if (!query || query.trim().length < 2) return [];
+async function usdaRequest(query, dataType, pageSize) {
   const url = new URL('https://api.nal.usda.gov/fdc/v1/foods/search');
   url.searchParams.set('api_key', USDA_API_KEY);
   url.searchParams.set('query', query);
-  url.searchParams.set('pageSize', '12');
-  url.searchParams.set('dataType', 'Branded,Foundation,SR Legacy');
-
+  url.searchParams.set('pageSize', String(pageSize));
+  url.searchParams.set('dataType', dataType);
   const res = await fetch(url.toString());
   if (!res.ok) throw new Error('USDA search failed: ' + res.status);
   const json = await res.json();
-  const rows = (json.foods || []).map(usdaFoodToRow);
+  return json.foods || [];
+}
 
-  // traduce los nombres (y la categoría) en paralelo; si una falla, se queda en inglés
-  await Promise.all(rows.map(async (r) => {
-    r.name = await translateToSpanish(r.name, userEmail);
-    if (r.category) r.category = await translateToSpanish(r.category, userEmail);
-  }));
+/**
+ * Busca en USDA y devuelve filas SIN esperar a traducir los nombres
+ * (los que no están en caché vienen con _needsTr = true; app.js los
+ * traduce después y los cambia en pantalla). Devuelve { rows, enQuery }.
+ */
+export async function searchUsda(query, userEmail) {
+  if (!query || query.trim().length < 2) return { rows: [], enQuery: '' };
+  // Dos peticiones en paralelo:
+  //  - genéricos (Foundation/SR Legacy) con la búsqueda en inglés: USDA está en inglés.
+  //  - de marca con lo que escribió el usuario: así salen productos latinos ("Savoy").
+  const brandedP = usdaRequest(query.trim(), 'Branded', 15).catch(() => []);
+  const enQuery = await queryToEnglish(query, userEmail);
+  const genericP = usdaRequest(enQuery, 'Foundation,SR Legacy', 50).catch(() => []);
+  const [generic, branded] = await Promise.all([genericP, brandedP]);
 
-  return rows;
+  // USDA repite fichas idénticas (mismo nombre, marca y kcal): se deja una.
+  const seen = new Set();
+  const rows = [];
+  for (const f of [...generic, ...branded]) {
+    const row = usdaFoodToRow(f);
+    const key = [normalizeText(row._en), normalizeText(row.brand), Math.round(row.kcal ?? -1)].join('|');
+    if (seen.has(f.fdcId) || seen.has(key)) continue;
+    seen.add(f.fdcId);
+    seen.add(key);
+    rows.push(row);
+  }
+  return { rows, enQuery };
+}
+
+/* ---- orden por relevancia (como MyFitnessPal) ---- */
+
+// Categorías que casi nunca son lo que se busca: "Babyfood, banana", "Snacks, rice cakes"
+const NOISY_PREFIX = /^(babyfood|snacks?|fast foods?|restaurant|beverages|cereals ready to eat|infant formula|school lunch)\b/;
+const ODD_FORM = /\b(puffed|powder|dried|dehydrated|flour|bran|substitute|imitation|restaurant|meatless|spread|feet)\b/;
+
+/** 0 = empieza por lo buscado, 1 = todas las palabras, 2 = alguna, 3 = ninguna */
+function matchLevel(name, query) {
+  const n = normalizeText(name);
+  const q = normalizeText(query);
+  if (!n || !q) return 3;
+  if (n === q || n === q + 's' || n.startsWith(q + ' ') || n.startsWith(q + 's ')) return 0;
+  const words = q.split(' ');
+  const has = w => new RegExp(`(^| )${w}(s|es)?( |$)`).test(n);
+  if (words.every(has)) return 1;
+  if (words.some(w => n.includes(w))) return 2;
+  return 3;
+}
+
+/**
+ * Ordena alimentos locales y de USDA juntos. Menor puntaje = más arriba:
+ *  1. lo que mejor coincide con la búsqueda (empieza por la palabra > la contiene)
+ *  2. lo que el usuario ya ha registrado antes
+ *  3. genéricos antes que productos de marca
+ *  4. sin ruido (snacks, comida para bebé, restaurante...)
+ *  5. nombres más cortos (más "puros") primero
+ */
+export function rankFoods(items, query, enQuery, usedIds = new Set()) {
+  const scored = items.map(f => {
+    let level = 3;
+    for (const nm of [f.name, f._en]) {
+      if (!nm) continue;
+      level = Math.min(level, matchLevel(nm, query));
+      if (enQuery) level = Math.min(level, matchLevel(nm, enQuery));
+    }
+    const isBranded = f._kind ? f._kind === 'branded' : !!f.brand;
+    const base = normalizeText(f._en || f.name);
+    let score = level * 100;
+    // tus alimentos (guardados en la tabla) suben; y más si ya los registraste
+    if (f.id && level <= 1) score -= usedIds.has(f.id) ? 90 : 40;
+    if (isBranded) score += 30;
+    if (NOISY_PREFIX.test(base)) score += 25;
+    if (ODD_FORM.test(base)) score += 10;
+    if (f.kcal == null) score += 15; // sin kcal casi no sirve para registrar
+    score += Math.min(base.length, 80) / 10;
+    return { f, score };
+  });
+  return scored.sort((a, b) => a.score - b.score).map(x => x.f);
+}
+
+/**
+ * Elige qué mostrar de la lista ya ordenada. USDA trae decenas de variantes
+ * genéricas ("arroz blanco grano largo crudo", "... cocido", "... con sal"...)
+ * que llenarían toda la pantalla; se limitan para dejar sitio a tus alimentos
+ * guardados y a los de marca, sin cambiar el orden.
+ */
+export function pickForDisplay(ranked, max = 20, caps = { generic: 12, branded: 6 }) {
+  const picked = new Set();
+  const used = { generic: 0, branded: 0 };
+  for (const f of ranked) {
+    if (picked.size >= max) break;
+    const group = f.id ? null : f._kind; // los tuyos (con id) no tienen tope
+    if (group && caps[group] != null) {
+      if (used[group] >= caps[group]) continue;
+      used[group]++;
+    }
+    picked.add(f);
+  }
+  for (const f of ranked) { // si sobra sitio, se rellena con los genéricos saltados
+    if (picked.size >= max) break;
+    picked.add(f);
+  }
+  return ranked.filter(f => picked.has(f));
 }
 
 export async function searchLocalFoods(query) {
@@ -201,7 +359,7 @@ export async function searchFavorites(userId, limit = 6) {
 }
 
 /** Inserta (si hace falta) una copia local de un resultado de USDA y devuelve la fila de foods. */
-export async function cacheUsdaFood(usdaRow, userId) {
+export async function cacheUsdaFood(usdaRow, userId, userEmail) {
   const { data: existing } = await supabase
     .from('foods')
     .select('*')
@@ -210,9 +368,17 @@ export async function cacheUsdaFood(usdaRow, userId) {
     .maybeSingle();
   if (existing) return existing;
 
+  // Los campos que empiezan por "_" son internos de la búsqueda: no son columnas.
+  const fields = {};
+  for (const [k, v] of Object.entries(usdaRow)) if (!k.startsWith('_')) fields[k] = v;
+  // La categoría no se traduce en la búsqueda (no se muestra); se traduce al guardar.
+  if (fields.category) fields.category = await translateToSpanish(fields.category, userEmail);
+  // Si el nombre aún no se había traducido en pantalla, se intenta una vez más.
+  if (usdaRow._needsTr && usdaRow._en) fields.name = await translateToSpanish(usdaRow._en, userEmail);
+
   const { data, error } = await supabase
     .from('foods')
-    .insert({ ...usdaRow, created_by: userId })
+    .insert({ ...fields, created_by: userId })
     .select()
     .single();
   if (error) throw error;

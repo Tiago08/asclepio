@@ -8,8 +8,8 @@ Estado y pendientes: página "Asclepio" en Notion (https://app.notion.com/p/40d4
 
 - Frontend estático en GitHub Pages: HTML, CSS y JavaScript con módulos ES. No hay build, ni npm, ni framework. Mantenlo así.
 - Supabase: Auth (código por correo), Postgres con RLS, triggers.
-- Cliente Supabase cargado desde `https://esm.sh/@supabase/supabase-js@2`.
-- USDA FoodData Central para buscar alimentos; traducción con MyMemory y caché en localStorage.
+- Cliente Supabase cargado desde esm.sh con versión fija y en un solo archivo: `https://esm.sh/@supabase/supabase-js@2.119.0/es2022/supabase-js.bundle.mjs` (si cambia la versión, cámbiala también en el `modulepreload` de `index.html`).
+- USDA FoodData Central para buscar alimentos. La búsqueda se pasa a inglés con el diccionario de `js/foodDict.js` (o MyMemory si la palabra no está), y los nombres se traducen al español con MyMemory y caché en localStorage.
 - PWA instalable en iPhone (manifest, apple-touch-icon, safe-area).
 - Repo público (Pages gratis lo exige): Tiago08/asclepio. Sitio: https://tiago08.github.io/asclepio/
 
@@ -17,12 +17,12 @@ Estado y pendientes: página "Asclepio" en Notion (https://app.notion.com/p/40d4
 
 - `index.html`: login, pestañas (Hoy, Historial, Ranking, Datos), hoja inferior para formularios.
 - `css/styles.css`: tema oscuro, sin bordes duros, hoja inferior, tab bar fija.
-- `js/app.js`: lógica principal y pantallas. `js/auth.js`, `js/foods.js`, `js/activity.js`, `js/report.js`, `js/config.js`, `js/supabaseClient.js`.
+- `js/app.js`: lógica principal y pantallas. `js/auth.js`, `js/foods.js` (búsqueda, traducción y orden por relevancia), `js/foodDict.js` (diccionario español → búsqueda en inglés), `js/activity.js`, `js/report.js`, `js/config.js`, `js/supabaseClient.js`.
 - `sql/`: esquema y migraciones que Santiago ejecuta a mano en el SQL Editor de Supabase.
 
 ## Reglas de trabajo
 
-- Cache-busting: los imports y el CSS llevan `?v=N` (ahora `?v=6`). Cada vez que cambies archivos, sube N en todos los imports, en `index.html` y en `supabaseClient.js`. Si no, Chrome y la app instalada muestran archivos viejos.
+- Cache-busting: los imports y el CSS llevan `?v=N` (ahora `?v=7`). Cada vez que cambies archivos, sube N en todos los imports, en `index.html` y en `supabaseClient.js`. Si no, Chrome y la app instalada muestran archivos viejos.
 - Todo el texto visible va en español.
 - Los cambios de base de datos van siempre en un archivo nuevo en `sql/`, idempotente (`if not exists`, `on conflict`, etc.). Nunca edites el esquema ya ejecutado. Al terminar, di a Santiago qué archivo ejecutar y en qué orden.
 - Tablas creadas por SQL necesitan `GRANT` a `authenticated` además de las políticas RLS (ya nos mordió: "permission denied for table").
