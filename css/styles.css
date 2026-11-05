@@ -36,7 +36,6 @@ body{
   font-size: 15px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
-  padding-bottom: calc(96px + env(safe-area-inset-bottom));
   -ms-overflow-style: none;
 }
 body.sheet-open{ overflow: hidden; }
@@ -51,11 +50,18 @@ input, select, textarea{ font-size: 16px; }
 }
 
 .hidden{ display: none !important; }
+/* La página nunca se desplaza: solo este contenedor de alto fijo. Así el alto del
+   documento no cambia entre pestañas y Safari no mueve la barra inferior. */
 .shell{
-  max-width: 480px; margin: 0 auto;
-  padding-left: max(22px, env(safe-area-inset-left));
-  padding-right: max(22px, env(safe-area-inset-right));
+  position: fixed; inset: 0;
+  overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  /* columna de 480 px centrada; el resto del ancho también desplaza */
+  padding-left: max(22px, env(safe-area-inset-left), calc(50% - 218px));
+  padding-right: max(22px, env(safe-area-inset-right), calc(50% - 218px));
+  padding-bottom: calc(96px + env(safe-area-inset-bottom));
 }
+.shell::-webkit-scrollbar{ display: none; }
 
 /* ---------- pantalla de carga ---------- */
 .boot-screen{

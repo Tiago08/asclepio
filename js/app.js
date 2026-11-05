@@ -1,21 +1,21 @@
-import { supabase } from './supabaseClient.js?v=9';
+import { supabase } from './supabaseClient.js?v=10';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js?v=9';
+} from './auth.js?v=10';
 import {
   NUTRIENT_FIELDS, MICRO_FIELDS, searchUsda, searchLocalFoods, searchFavorites, updateFood,
   cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel
-} from './foods.js?v=9';
-import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=9';
-import { buildReportText, downloadText } from './report.js?v=9';
-import { BASICS, searchBasics } from './basics.js?v=9';
+} from './foods.js?v=10';
+import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=10';
+import { buildReportText, downloadText } from './report.js?v=10';
+import { BASICS, searchBasics } from './basics.js?v=10';
 import {
   getGoalHistory, saveGoalsFrom, goalsForDate, getBodyProfile, saveBodyProfile, suggestGoals,
   getWeights, saveWeight, deleteWeight, getSupplements, addSupplement, retireSupplement,
   getSupplementLogs, getSupplementLogsInRange, setSupplementTaken, getWaterLogs, addWater, deleteWater,
   electrolyteTotals, getCombos, createCombo, deleteCombo
-} from './health.js?v=9';
+} from './health.js?v=10';
 
 /* ================= utilidades de hora ================= */
 
@@ -1240,7 +1240,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
-    window.scrollTo({ top: 0 });
+    appShell.scrollTo({ top: 0 });
     if(btn.dataset.tab === 'historial') await renderHistory();
     if(btn.dataset.tab === 'ranking') await renderRanking();
   });
