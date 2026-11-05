@@ -1,21 +1,21 @@
-import { supabase } from './supabaseClient.js?v=17';
+import { supabase } from './supabaseClient.js?v=18';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js?v=17';
+} from './auth.js?v=18';
 import {
   NUTRIENT_FIELDS, MICRO_FIELDS, searchUsda, searchLocalFoods, searchFavorites, updateFood,
-  cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, moveFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel, pluralEs
-} from './foods.js?v=17';
-import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=17';
-import { buildReportText, downloadText } from './report.js?v=17';
-import { BASICS, searchBasics } from './basics.js?v=17';
+  cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, moveFoodLog, restoreFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel, pluralEs
+} from './foods.js?v=18';
+import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=18';
+import { buildReportText, downloadText } from './report.js?v=18';
+import { BASICS, searchBasics } from './basics.js?v=18';
 import {
   getGoalHistory, saveGoalsFrom, goalsForDate, getBodyProfile, saveBodyProfile, suggestGoals, PACES, paceOf, objectiveOf,
   getWeights, saveWeight, deleteWeight, getSupplements, addSupplement, retireSupplement,
   getSupplementLogs, getSupplementLogsInRange, setSupplementTaken, getWaterLogs, addWater, deleteWater,
   electrolyteTotals, getCombos, createCombo, deleteCombo
-} from './health.js?v=17';
+} from './health.js?v=18';
 
 /* ================= actualización automática ================= */
 /* GitHub Pages deja guardar index.html hasta 10 min y la app instalada en el
@@ -279,10 +279,20 @@ const sheet = document.getElementById('sheet');
 const sheetBackdrop = document.getElementById('sheetBackdrop');
 const toastEl = document.getElementById('toast');
 
-function showToast(msg){
+let toastTimer = null;
+/** Aviso abajo. Con action ({ label, fn }) lleva un botón (ej. Deshacer) y dura más. */
+function showToast(msg, action){
+  clearTimeout(toastTimer);
   toastEl.textContent = msg;
+  toastEl.classList.toggle('has-action', !!action);
+  if(action){
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'toast-action'; b.textContent = action.label;
+    b.addEventListener('click', () => { toastEl.classList.remove('show'); action.fn(); }, { once: true });
+    toastEl.appendChild(b);
+  }
   toastEl.classList.add('show');
-  setTimeout(() => toastEl.classList.remove('show'), 1600);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), action ? 4500 : 1600);
 }
 function showError(msg){
   let b = document.getElementById('errBanner');
@@ -342,8 +352,81 @@ function closeForm(){
   sheet.classList.add('hidden');
   sheetBackdrop.classList.add('hidden');
   document.body.classList.remove('sheet-open');
+  sheet.style.transform = sheet.style.transition = '';
+  sheetBackdrop.style.opacity = sheetBackdrop.style.transition = '';
 }
-sheetBackdrop.addEventListener('click', closeForm);
+
+/** Cierra la hoja deslizándola hacia abajo (para el gesto, el fondo, la barrita y Esc). */
+function dismissSheet(){
+  if(sheet.classList.contains('hidden')) return;
+  if(document.activeElement && sheet.contains(document.activeElement)) document.activeElement.blur();
+  sheet.style.transition = 'transform 220ms cubic-bezier(.3,.7,.4,1)';
+  sheet.style.transform = `translateY(${sheet.offsetHeight + 40}px)`;
+  sheetBackdrop.style.transition = 'opacity 220ms ease';
+  sheetBackdrop.style.opacity = '0';
+  setTimeout(closeForm, 220);
+}
+sheetBackdrop.addEventListener('click', dismissSheet);
+document.getElementById('sheetGrip').addEventListener('click', dismissSheet);
+document.addEventListener('keydown', e => { if(e.key === 'Escape') dismissSheet(); });
+
+/* Deslizar hacia abajo para cerrar, como las hojas de iOS. Se arrastra desde
+   la barrita de arriba, o desde cualquier parte si la hoja ya está arriba del
+   todo (si no, el dedo hace scroll normal). La hoja sigue al dedo; al soltar
+   se cierra si bajó bastante o si el gesto fue rápido, si no vuelve a su sitio.
+   Son eventos táctiles (no pointer) porque hay que poder frenar el scroll. */
+(function sheetDrag(){
+  let y0 = 0, x0 = 0, y = 0, state = 'idle', samples = [];
+  sheet.addEventListener('touchstart', e => {
+    if(e.touches.length !== 1){ state = 'idle'; return; }
+    const t = e.touches[0];
+    y0 = t.clientY; x0 = t.clientX; y = 0;
+    const fromTop = t.clientY - sheet.getBoundingClientRect().top;
+    state = (fromTop < 44 || sheet.scrollTop <= 0) ? 'pending' : 'idle';
+    samples = [{ y: t.clientY, t: e.timeStamp }];
+  }, { passive: true });
+
+  sheet.addEventListener('touchmove', e => {
+    if(state === 'idle') return;
+    const t = e.touches[0];
+    const dy = t.clientY - y0, dx = t.clientX - x0;
+    if(state === 'pending'){
+      if(Math.abs(dy) < 6 && Math.abs(dx) < 6) return;
+      if(dy > 0 && dy > Math.abs(dx)){
+        state = 'drag';
+        sheet.style.transition = 'none';
+        sheetBackdrop.style.transition = 'none';
+        if(document.activeElement && sheet.contains(document.activeElement)) document.activeElement.blur();
+      }else{ state = 'idle'; return; }
+    }
+    e.preventDefault();   // se mueve la hoja, no el contenido
+    y = Math.max(0, dy);
+    sheet.style.transform = `translateY(${y}px)`;
+    sheetBackdrop.style.opacity = String(Math.max(0, 1 - y / (sheet.offsetHeight * 1.1)));
+    samples.push({ y: t.clientY, t: e.timeStamp });
+    if(samples.length > 12) samples.shift();
+  }, { passive: false });
+
+  const end = () => {
+    if(state !== 'drag'){ state = 'idle'; return; }
+    state = 'idle';
+    // velocidad del final del gesto (últimos ~100 ms), como hace iOS
+    const b = samples[samples.length - 1];
+    const a = samples.find(p => b.t - p.t <= 100) || samples[0];
+    const v = b.t > a.t ? (b.y - a.y) / (b.t - a.t) : 0;   // px/ms, + = hacia abajo
+    if(y > Math.min(140, sheet.offsetHeight * 0.3) || (v > 0.5 && y > 30)){
+      dismissSheet();
+    }else{
+      // vuelve a su sitio con un pequeño rebote
+      sheet.style.transition = 'transform 260ms cubic-bezier(.2,.9,.3,1.15)';
+      sheet.style.transform = '';
+      sheetBackdrop.style.transition = 'opacity 200ms ease';
+      sheetBackdrop.style.opacity = '';
+    }
+  };
+  sheet.addEventListener('touchend', end);
+  sheet.addEventListener('touchcancel', end);
+})();
 
 /* ================= login ================= */
 
@@ -1367,12 +1450,14 @@ function renderMeals(foods){
           <button class="meal-add" data-add-meal="${m}" type="button" aria-label="Agregar a ${m}">+</button>
         </div>
         ${items.length ? `<div class="meal-items">${items.map(e => `
-          <div class="meal-item">
-            <button class="mi-main" data-move-food="${e.id}" type="button" aria-label="Mover ${escapeHtml(foodLogLabel(e.data))} a otra comida">
-              <span class="mi-name">${escapeHtml(foodLogLabel(e.data))}</span>
-              <span class="mi-kcal mono">${e.data.kcal != null ? Math.round(e.data.kcal) : '–'}</span>
-            </button>
-            <button class="mi-del" data-del-food="${e.id}" type="button" aria-label="Eliminar ${escapeHtml(foodLogLabel(e.data))}">×</button>
+          <div class="meal-item swipe-row" data-food-row="${e.id}">
+            <div class="swipe-bg"><button class="swipe-del" type="button" tabindex="-1"><span class="swipe-ic" aria-hidden="true">🗑</span><span>Eliminar</span></button></div>
+            <div class="swipe-fg">
+              <button class="mi-main" data-move-food="${e.id}" type="button" aria-label="${escapeHtml(foodLogLabel(e.data))}: tocar para mover, deslizar a la izquierda para eliminar">
+                <span class="mi-name">${escapeHtml(foodLogLabel(e.data))}</span>
+                <span class="mi-kcal mono">${e.data.kcal != null ? Math.round(e.data.kcal) : '–'}</span>
+              </button>
+            </div>
           </div>`).join('')}</div>` : ''}
       </div>`;
   }).join('');
@@ -1381,7 +1466,148 @@ function renderMeals(foods){
     const entry = foods.find(e => e.id === b.dataset.moveFood);
     if(entry) openMoveFood(entry.data);
   }));
+  mealList.querySelectorAll('[data-food-row]').forEach(row => {
+    const entry = foods.find(e => e.id === row.dataset.foodRow);
+    if(entry) enableSwipeDelete(row, () => removeFoodWithUndo(entry.data, row));
+  });
 }
+
+/** Borra un registro de comida y ofrece "Deshacer" (lo vuelve a guardar tal cual). */
+async function removeFoodWithUndo(row, rowEl){
+  try{
+    await deleteFoodLog(row.id);
+  }catch(err){
+    showToast('Error: ' + err.message);
+    if(rowEl) resetSwipe(rowEl, true);
+    return;
+  }
+  await refreshAfterLog();
+  showToast('Eliminado', { label: 'Deshacer', fn: async () => {
+    try{ await restoreFoodLog(row); await refreshAfterLog(); showToast('Recuperado'); }
+    catch(err){ showToast('Error: ' + err.message); }
+  }});
+}
+
+/* ---- deslizar a la izquierda para eliminar (como Mail en el iPhone) ----
+   La fila (adelante) se corre con el dedo y deja ver el fondo rojo de atrás,
+   que se enciende a medida que deslizas.
+   - Largo (más de la mitad) o rápido: se elimina al soltar.
+   - Corto: queda abierto el botón rojo "Eliminar" para confirmar con un toque.
+   - Poco: vuelve a su sitio.
+   Con el dedo se usan eventos táctiles: si el gesto empieza vertical se deja
+   el scroll normal; si es horizontal, se frena el scroll y se mueve la fila.
+   (Con pointer events el navegador cancelaba el gesto a los pocos píxeles.) */
+const SWIPE_OPEN = 104;   // ancho del botón rojo cuando queda abierto
+let openSwipeRow = null;
+
+function setSwipe(row, x, animate){
+  const fg = row.querySelector('.swipe-fg');
+  fg.style.transition = animate ? 'transform 240ms cubic-bezier(.2,.9,.3,1)' : 'none';
+  fg.style.transform = x ? `translateX(${x}px)` : '';
+  row.style.setProperty('--swipe-p', Math.max(0, Math.min(1, -x / SWIPE_OPEN)).toFixed(3));
+  row.classList.toggle('armed', -x > (row.offsetWidth || 1) * 0.5);
+  row._x = x;
+}
+function resetSwipe(row, animate){
+  setSwipe(row, 0, animate);
+  row.classList.remove('is-open', 'is-deleting');
+  row.style.height = '';
+  if(openSwipeRow === row) openSwipeRow = null;
+}
+
+function enableSwipeDelete(row, onDelete){
+  const fg = row.querySelector('.swipe-fg');
+  let x0 = 0, y0 = 0, base = 0, state = 'idle', samples = [], suppressClick = false;
+
+  const commit = () => {
+    if(row.classList.contains('is-deleting')) return;
+    row.classList.add('is-deleting');
+    if(openSwipeRow === row) openSwipeRow = null;
+    setSwipe(row, -row.offsetWidth - 20, true);
+    // la fila se encoge para que las de abajo suban suavemente
+    row.style.height = row.offsetHeight + 'px';
+    requestAnimationFrame(() => requestAnimationFrame(() => { row.style.height = '0px'; }));
+    setTimeout(onDelete, 260);
+  };
+
+  // start/move/end reciben coordenadas: los usan el dedo (touch) y el mouse.
+  const start = (x, y, t) => {
+    if(row.classList.contains('is-deleting')) return;
+    if(openSwipeRow && openSwipeRow !== row) resetSwipe(openSwipeRow, true);
+    x0 = x; y0 = y; base = row._x || 0;
+    state = 'pending'; samples = [{ x, t }];
+  };
+  /** Devuelve true si el gesto es de la fila (horizontal): hay que frenar el scroll. */
+  const move = (cx, cy, t) => {
+    if(state === 'idle') return false;
+    const dx = cx - x0, dy = cy - y0;
+    if(state === 'pending'){
+      if(Math.abs(dx) < 8 && Math.abs(dy) < 8) return false;
+      if(Math.abs(dx) > Math.abs(dy) * 1.2) state = 'drag';
+      else{ state = 'idle'; return false; }   // vertical: es scroll, no es nuestro
+    }
+    let x = base + dx;
+    if(x > 0) x = x * 0.2;   // hacia la derecha casi no se mueve (resistencia)
+    setSwipe(row, x, false);
+    samples.push({ x: cx, t });
+    if(samples.length > 12) samples.shift();
+    return true;
+  };
+
+  // dedo: eventos táctiles; una vez que el gesto es horizontal se frena el scroll
+  fg.addEventListener('touchstart', e => {
+    if(e.touches.length !== 1){ state = 'idle'; return; }
+    const p = e.touches[0];
+    start(p.clientX, p.clientY, e.timeStamp);
+  }, { passive: true });
+  fg.addEventListener('touchmove', e => {
+    const p = e.touches[0];
+    if(move(p.clientX, p.clientY, e.timeStamp) && e.cancelable) e.preventDefault();
+  }, { passive: false });
+  fg.addEventListener('touchend', () => end());
+  fg.addEventListener('touchcancel', () => { if(state === 'drag') resetSwipe(row, true); state = 'idle'; });
+  // mouse (computadora): arrastrar con el botón apretado
+  fg.addEventListener('pointerdown', e => {
+    if(e.pointerType !== 'mouse' || e.button !== 0) return;
+    start(e.clientX, e.clientY, e.timeStamp);
+    const mm = ev => move(ev.clientX, ev.clientY, ev.timeStamp);
+    const mu = () => { window.removeEventListener('pointermove', mm); end(); };
+    window.addEventListener('pointermove', mm);
+    window.addEventListener('pointerup', mu, { once: true });
+  });
+
+  const end = () => {
+    if(state !== 'drag'){ state = 'idle'; return; }
+    state = 'idle';
+    suppressClick = true;   // el "click" que llega al soltar no debe abrir Mover
+    setTimeout(() => { suppressClick = false; }, 50);
+    const x = row._x || 0;
+    const b = samples[samples.length - 1];
+    const a = samples.find(p => b.t - p.t <= 100) || samples[0];
+    const v = b.t > a.t ? (b.x - a.x) / (b.t - a.t) : 0;   // px/ms, − = hacia la izquierda
+    if(row.classList.contains('armed') || (v < -0.9 && x < -60)){
+      commit();
+    }else if(x < -SWIPE_OPEN / 2){
+      setSwipe(row, -SWIPE_OPEN, true);
+      row.classList.add('is-open');
+      openSwipeRow = row;
+    }else{
+      resetSwipe(row, true);
+    }
+  };
+  // tocar una fila abierta la cierra (en vez de abrir Mover)
+  fg.addEventListener('click', e => {
+    if(suppressClick || row.classList.contains('is-open')){
+      e.preventDefault(); e.stopImmediatePropagation();
+      if(!suppressClick) resetSwipe(row, true);
+    }
+  }, true);
+  row.querySelector('.swipe-del').addEventListener('click', commit);
+}
+// tocar fuera cierra la fila que quedó abierta
+document.addEventListener('pointerdown', e => {
+  if(openSwipeRow && !openSwipeRow.contains(e.target)) resetSwipe(openSwipeRow, true);
+}, true);
 
 /** Tocar un alimento de Hoy: moverlo a otra comida si lo pusiste en la equivocada. */
 function openMoveFood(row){
@@ -1397,9 +1623,11 @@ function openMoveFood(row){
       <button class="check-row${m === current ? ' is-current' : ''}" data-move-to="${m}" type="button" ${m === current ? 'disabled' : ''}>
         <span class="pick-ic" aria-hidden="true">${MEAL_ICON[m]}</span><span>${m}</span>
         ${m === current ? '<span class="move-here">está aquí</span>' : ''}</button>`).join('')}</div>
-    <div class="form-actions"><button class="btn-ghost" id="cancelBtn" type="button">Cancelar</button></div>`;
+    <div class="form-actions"><button class="btn-ghost" id="cancelBtn" type="button">Cancelar</button></div>
+    <button class="btn-link btn-danger-link" id="deleteFoodBtn" type="button">Eliminar este alimento</button>`;
   formArea.appendChild(card);
   card.querySelector('#cancelBtn').addEventListener('click', closeForm);
+  card.querySelector('#deleteFoodBtn').addEventListener('click', () => { dismissSheet(); removeFoodWithUndo(row, null); });
   card.querySelectorAll('[data-move-to]:not([disabled])').forEach(b => b.addEventListener('click', async () => {
     card.querySelectorAll('[data-move-to]').forEach(x => { x.disabled = true; });
     try{

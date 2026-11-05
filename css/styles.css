@@ -391,7 +391,13 @@ header{
   padding: 10px 0 calc(24px + env(safe-area-inset-bottom));
 }
 .sheet.kb-open .form-actions.sticky{ bottom: -16px; margin-bottom: -16px; padding-bottom: 16px; }
-.sheet-grip{ width: 40px; height: 4px; border-radius: 99px; background: var(--surface-raised); margin: 0 auto 14px; }
+/* la barrita: se puede arrastrar (o tocar) para cerrar. Zona de toque grande. */
+.sheet-grip-btn{
+  display: flex; align-items: center; justify-content: center; width: 120px; height: 26px;
+  margin: -8px auto 6px; padding: 0; background: none; border: none; cursor: grab;
+}
+.sheet-grip{ display: block; width: 40px; height: 5px; border-radius: 99px; background: var(--surface-raised); transition: background 120ms ease, width 120ms ease; }
+.sheet-grip-btn:active .sheet-grip{ background: var(--text-faint); width: 48px; }
 .sheet .form-card{ background: none; box-shadow: none; padding: 0; margin: 0; border-radius: 0; }
 @keyframes sheet-up{ from{ transform: translateY(100%); } to{ transform: translateY(0); } }
 @keyframes fade-in{ from{ opacity: 0; } to{ opacity: 1; } }
@@ -559,8 +565,33 @@ header{
 .check-row.is-current{ opacity: 0.55; }
 .move-here{ margin-left: auto; font-size: 12px; color: var(--text-faint); }
 .mi-kcal{ font-size: 12.5px; color: var(--text-faint); }
-.mi-del{ width: 34px; height: 34px; flex: none; background: none; border: none; color: var(--text-faint); font-size: 18px; border-radius: 50%; }
-.mi-del:active{ color: var(--danger); background: var(--surface-sunken); }
+/* deslizar para eliminar: adelante la fila, atrás el rojo */
+.swipe-row{
+  display: block; position: relative; overflow: hidden; border-radius: 10px; margin-right: 8px; padding: 0;
+  transition: height 240ms ease, opacity 240ms ease; --swipe-p: 0;
+}
+.swipe-row.is-deleting{ opacity: 0; }
+.swipe-bg{
+  position: absolute; inset: 0 0 0 12px; display: flex; justify-content: flex-end; align-items: stretch;
+  /* el rojo se enciende a medida que deslizas */
+  background: color-mix(in srgb, #e5484d calc(var(--swipe-p) * 100%), var(--surface-sunken));
+}
+.swipe-row.armed .swipe-bg{ background: #e5484d; }
+.swipe-del{
+  pointer-events: none;
+  display: flex; align-items: center; justify-content: center; gap: 6px; width: 104px;
+  background: none; border: none; color: #fff; font: inherit; font-size: 13px; font-weight: 600;
+  opacity: var(--swipe-p); transform: scale(calc(0.8 + var(--swipe-p) * 0.2));
+  transition: transform 160ms ease;
+}
+.swipe-ic{ font-size: 15px; }
+.swipe-row.armed .swipe-del{ transform: scale(1.1); }
+.swipe-fg{ position: relative; z-index: 1; width: 100%; display: flex; background: var(--surface); touch-action: pan-y; will-change: transform; }
+.swipe-fg .mi-main{ margin-left: 0; padding-left: 0; padding-right: 4px; }
+.btn-danger-link{ color: var(--danger); }
+.toast.has-action{ pointer-events: auto; display: flex; align-items: center; gap: 14px; padding: 6px 6px 6px 18px; }
+.toast-action{ background: none; border: none; color: var(--accent); font: inherit; font-weight: 600; padding: 8px 12px; border-radius: 99px; }
+.toast-action:active{ background: var(--surface-sunken); }
 #panel-hoy > .favorites-row{ padding: 0 0 14px; scrollbar-width: none; }
 #panel-hoy > .favorites-row::-webkit-scrollbar{ display: none; }
 #panel-hoy > .favorites-row:empty{ display: none; }
@@ -622,3 +653,5 @@ header{
 .rank-info-list{ display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-dim); }
 .rank-info-list > div{ display: flex; gap: 8px; align-items: baseline; }
 .rank-info-list .mono{ margin-left: auto; color: var(--text); font-size: 12px; text-align: right; }
+/* el botón rojo solo se puede tocar cuando la fila quedó abierta */
+.swipe-row.is-open .swipe-del{ pointer-events: auto; }

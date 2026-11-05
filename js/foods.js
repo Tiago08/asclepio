@@ -1,6 +1,6 @@
-import { supabase } from './supabaseClient.js?v=17';
-import { USDA_API_KEY } from './config.js?v=17';
-import { dictQueryToEnglish, normalizeText } from './foodDict.js?v=17';
+import { supabase } from './supabaseClient.js?v=18';
+import { USDA_API_KEY } from './config.js?v=18';
+import { dictQueryToEnglish, normalizeText } from './foodDict.js?v=18';
 
 // Campos nutricionales que manejamos en toda la app, en el orden
 // en que se muestran. Un solo lugar para no desincronizar listas.
@@ -522,6 +522,12 @@ export async function moveFoodLog(id, momento) {
   if (error && error.code === '23514' && momento === 'Merienda') {
     ({ error } = await supabase.from('food_logs').update({ momento: 'Snack' }).eq('id', id));
   }
+  if (error) throw error;
+}
+
+/** "Deshacer": vuelve a guardar un registro borrado, igual que estaba (mismo id). */
+export async function restoreFoodLog(row) {
+  const { error } = await supabase.from('food_logs').insert({ ...row });
   if (error) throw error;
 }
 

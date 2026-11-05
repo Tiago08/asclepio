@@ -15,20 +15,20 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/styles.css?v=17">
+<link rel="stylesheet" href="css/styles.css?v=18">
 <!-- Precarga en paralelo: sin esto el navegador descubre cada módulo
      solo después de bajar el anterior (una cascada en serie). -->
 <link rel="modulepreload" href="https://esm.sh/@supabase/supabase-js@2.119.0/es2022/supabase-js.bundle.mjs" crossorigin>
-<link rel="modulepreload" href="js/app.js?v=17">
-<link rel="modulepreload" href="js/supabaseClient.js?v=17">
-<link rel="modulepreload" href="js/config.js?v=17">
-<link rel="modulepreload" href="js/auth.js?v=17">
-<link rel="modulepreload" href="js/foods.js?v=17">
-<link rel="modulepreload" href="js/foodDict.js?v=17">
-<link rel="modulepreload" href="js/basics.js?v=17">
-<link rel="modulepreload" href="js/activity.js?v=17">
-<link rel="modulepreload" href="js/report.js?v=17">
-<link rel="modulepreload" href="js/health.js?v=17">
+<link rel="modulepreload" href="js/app.js?v=18">
+<link rel="modulepreload" href="js/supabaseClient.js?v=18">
+<link rel="modulepreload" href="js/config.js?v=18">
+<link rel="modulepreload" href="js/auth.js?v=18">
+<link rel="modulepreload" href="js/foods.js?v=18">
+<link rel="modulepreload" href="js/foodDict.js?v=18">
+<link rel="modulepreload" href="js/basics.js?v=18">
+<link rel="modulepreload" href="js/activity.js?v=18">
+<link rel="modulepreload" href="js/report.js?v=18">
+<link rel="modulepreload" href="js/health.js?v=18">
 </head>
 <body>
 
@@ -180,7 +180,7 @@
 <!-- ============ BOTTOM SHEET ============ -->
 <div class="sheet-backdrop hidden" id="sheetBackdrop"></div>
 <div class="sheet hidden" id="sheet" role="dialog" aria-modal="true">
-  <div class="sheet-grip"></div>
+  <button class="sheet-grip-btn" id="sheetGrip" type="button" aria-label="Cerrar"><span class="sheet-grip"></span></button>
   <div id="formArea"></div>
 </div>
 
@@ -199,6 +199,6 @@
     }
   })();
 </script>
-<script type="module" src="js/app.js?v=17"></script>
+<script type="module" src="js/app.js?v=18"></script>
 </body>
 </html>

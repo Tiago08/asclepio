@@ -30,7 +30,7 @@ Estado y pendientes: página "Asclepio" en Notion (https://app.notion.com/p/40d4
 
 ## Reglas de trabajo
 
-- Cache-busting: los imports y el CSS llevan `?v=N` (ahora `?v=17`). Cada vez que cambies archivos, sube N en todos los imports, en `index.html` y en `supabaseClient.js`. Si no, Chrome y la app instalada muestran archivos viejos. Además `app.js` compara su `?v` con el del `index.html` publicado al abrir o volver a la app y se recarga solo si hay versión nueva (por eso el `?v` de `app.js` en `index.html` siempre debe subir).
+- Cache-busting: los imports y el CSS llevan `?v=N` (ahora `?v=18`). Cada vez que cambies archivos, sube N en todos los imports, en `index.html` y en `supabaseClient.js`. Si no, Chrome y la app instalada muestran archivos viejos. Además `app.js` compara su `?v` con el del `index.html` publicado al abrir o volver a la app y se recarga solo si hay versión nueva (por eso el `?v` de `app.js` en `index.html` siempre debe subir).
 - Todo el texto visible va en español.
 - Los cambios de base de datos van siempre en un archivo nuevo en `sql/`, idempotente (`if not exists`, `on conflict`, etc.). Nunca edites el esquema ya ejecutado. Al terminar, di a Santiago qué archivo ejecutar y en qué orden.
 - Tablas creadas por SQL necesitan `GRANT` a `authenticated` además de las políticas RLS (ya nos mordió: "permission denied for table").
@@ -41,6 +41,8 @@ Estado y pendientes: página "Asclepio" en Notion (https://app.notion.com/p/40d4
 ## Diseño
 
 Estilo "cuaderno de laboratorio" oscuro, cómodo y poco "encajonado", como MyFitnessPal: tarjetas redondeadas, sin bordes duros, colores por categoría, hoja inferior con fondo difuminado. No añadir elementos que sobrecarguen la pantalla Hoy.
+
+Gestos (como iOS): la hoja inferior se cierra deslizándola hacia abajo (o tocando la barrita, el fondo o Esc). En Hoy, tocar un alimento abre "Mover a otra comida" (con "Eliminar" abajo) y deslizarlo a la izquierda lo elimina, con "Deshacer" en el aviso. Los gestos con el dedo usan eventos táctiles (`touchmove` con `preventDefault`), no pointer events: Chromium e iOS cancelan el pointer a los pocos píxeles. En Playwright, después de un arrastre vertical simulado por CDP los toques dejan de generar `click` (pasa igual sin estos gestos): prueba los toques antes de los arrastres.
 
 ## Pruebas
 
