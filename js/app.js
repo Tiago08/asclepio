@@ -1,21 +1,21 @@
-import { supabase } from './supabaseClient.js?v=15';
+import { supabase } from './supabaseClient.js?v=16';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js?v=15';
+} from './auth.js?v=16';
 import {
   NUTRIENT_FIELDS, MICRO_FIELDS, searchUsda, searchLocalFoods, searchFavorites, updateFood,
-  cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel, pluralEs
-} from './foods.js?v=15';
-import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=15';
-import { buildReportText, downloadText } from './report.js?v=15';
-import { BASICS, searchBasics } from './basics.js?v=15';
+  cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, moveFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel, pluralEs
+} from './foods.js?v=16';
+import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=16';
+import { buildReportText, downloadText } from './report.js?v=16';
+import { BASICS, searchBasics } from './basics.js?v=16';
 import {
   getGoalHistory, saveGoalsFrom, goalsForDate, getBodyProfile, saveBodyProfile, suggestGoals, PACES, paceOf, objectiveOf,
   getWeights, saveWeight, deleteWeight, getSupplements, addSupplement, retireSupplement,
   getSupplementLogs, getSupplementLogsInRange, setSupplementTaken, getWaterLogs, addWater, deleteWater,
   electrolyteTotals, getCombos, createCombo, deleteCombo
-} from './health.js?v=15';
+} from './health.js?v=16';
 
 /* ================= utilidades de hora ================= */
 
@@ -1341,13 +1341,48 @@ function renderMeals(foods){
         </div>
         ${items.length ? `<div class="meal-items">${items.map(e => `
           <div class="meal-item">
-            <span class="mi-name">${escapeHtml(foodLogLabel(e.data))}</span>
+            <button class="mi-name" data-move-food="${e.id}" type="button" aria-label="Mover ${escapeHtml(foodLogLabel(e.data))} a otra comida">${escapeHtml(foodLogLabel(e.data))}</button>
             <span class="mi-kcal mono">${e.data.kcal != null ? Math.round(e.data.kcal) : '–'}</span>
             <button class="mi-del" data-del-food="${e.id}" type="button" aria-label="Eliminar ${escapeHtml(foodLogLabel(e.data))}">×</button>
           </div>`).join('')}</div>` : ''}
       </div>`;
   }).join('');
   mealList.querySelectorAll('[data-add-meal]').forEach(b => b.addEventListener('click', () => openFoodForm(b.dataset.addMeal)));
+  mealList.querySelectorAll('[data-move-food]').forEach(b => b.addEventListener('click', () => {
+    const entry = foods.find(e => e.id === b.dataset.moveFood);
+    if(entry) openMoveFood(entry.data);
+  }));
+}
+
+/** Tocar un alimento de Hoy: moverlo a otra comida si lo pusiste en la equivocada. */
+function openMoveFood(row){
+  resetForm();
+  const current = mealOf(row.momento);
+  const card = document.createElement('div');
+  card.className = 'form-card';
+  card.style.setProperty('--cat-color', CAT_COLOR.comida);
+  card.innerHTML = `
+    <h3>Mover a otra comida</h3>
+    <p class="move-food-name">${escapeHtml(foodLogLabel(row))}${row.kcal != null ? ` · ${Math.round(row.kcal)} kcal` : ''}</p>
+    <div class="check-list">${MEALS.map(m => `
+      <button class="check-row${m === current ? ' is-current' : ''}" data-move-to="${m}" type="button" ${m === current ? 'disabled' : ''}>
+        <span class="pick-ic" aria-hidden="true">${MEAL_ICON[m]}</span><span>${m}</span>
+        ${m === current ? '<span class="move-here">está aquí</span>' : ''}</button>`).join('')}</div>
+    <div class="form-actions"><button class="btn-ghost" id="cancelBtn" type="button">Cancelar</button></div>`;
+  formArea.appendChild(card);
+  card.querySelector('#cancelBtn').addEventListener('click', closeForm);
+  card.querySelectorAll('[data-move-to]:not([disabled])').forEach(b => b.addEventListener('click', async () => {
+    card.querySelectorAll('[data-move-to]').forEach(x => { x.disabled = true; });
+    try{
+      await moveFoodLog(row.id, b.dataset.moveTo);
+      closeForm();
+      showToast(`Movido a ${b.dataset.moveTo}`);
+      await refreshAfterLog();
+    }catch(err){
+      showToast('Error: ' + err.message);
+      card.querySelectorAll('[data-move-to]').forEach(x => { x.disabled = x.classList.contains('is-current'); });
+    }
+  }));
 }
 
 /* ================= hoy: mosaicos de estado del día ================= */

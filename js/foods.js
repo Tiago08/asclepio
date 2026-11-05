@@ -1,6 +1,6 @@
-import { supabase } from './supabaseClient.js?v=15';
-import { USDA_API_KEY } from './config.js?v=15';
-import { dictQueryToEnglish, normalizeText } from './foodDict.js?v=15';
+import { supabase } from './supabaseClient.js?v=16';
+import { USDA_API_KEY } from './config.js?v=16';
+import { dictQueryToEnglish, normalizeText } from './foodDict.js?v=16';
 
 // Campos nutricionales que manejamos en toda la app, en el orden
 // en que se muestran. Un solo lugar para no desincronizar listas.
@@ -513,6 +513,16 @@ export async function logFood({ userId, foodRow, quantity, momento, date, time, 
   }
   if (error) throw error;
   return data;
+}
+
+/** Cambia un registro de comida a otro momento (ej. de Desayuno a Cena). */
+export async function moveFoodLog(id, momento) {
+  let { error } = await supabase.from('food_logs').update({ momento }).eq('id', id);
+  // sin sql/fase2b.sql la tabla no acepta "Merienda": se guarda como "Snack" (igual que en logFood)
+  if (error && error.code === '23514' && momento === 'Merienda') {
+    ({ error } = await supabase.from('food_logs').update({ momento: 'Snack' }).eq('id', id));
+  }
+  if (error) throw error;
 }
 
 export async function deleteFoodLog(id) {
