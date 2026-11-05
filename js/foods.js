@@ -1,6 +1,6 @@
-import { supabase } from './supabaseClient.js?v=12';
-import { USDA_API_KEY } from './config.js?v=12';
-import { dictQueryToEnglish, normalizeText } from './foodDict.js?v=12';
+import { supabase } from './supabaseClient.js?v=13';
+import { USDA_API_KEY } from './config.js?v=13';
+import { dictQueryToEnglish, normalizeText } from './foodDict.js?v=13';
 
 // Campos nutricionales que manejamos en toda la app, en el orden
 // en que se muestran. Un solo lugar para no desincronizar listas.
@@ -448,9 +448,27 @@ export async function updateFood(id, fields) {
   return data;
 }
 
+/** "unidad mediana" -> "unidades medianas", "taza" -> "tazas". Para en "de"
+    ("taza de arroz" -> "tazas de arroz") y no toca lo que tenga números. */
+export function pluralEs(label){
+  const words = String(label).split(' ');
+  for(let i = 0; i < words.length; i++){
+    const w = words[i];
+    if(['de', 'del', 'con', 'sin', 'en'].includes(w.toLowerCase()) || /[\d()]/.test(w)) break;
+    if(/[sx]$/i.test(w)) continue;
+    if(/z$/i.test(w)) words[i] = w.slice(0, -1) + 'ces';
+    else if(/[aeiouáéó]$/i.test(w)) words[i] = w + 's';
+    else words[i] = w + 'es';
+  }
+  return words.join(' ');
+}
+
 /** Texto de un registro de comida: "Arroz blanco cocido · 1 taza" o, en los viejos, "Arepa x2". */
 export function foodLogLabel(d) {
-  const name = d.food_name_snapshot || '';
+  let name = d.food_name_snapshot || '';
+  // registros guardados antes del plural: "Arepa · 2 unidad" -> "Arepa · 2 unidades"
+  name = name.replace(/ · (\d+(?:\.\d+)?) ([^·]+)$/, (all, n, unit) =>
+    Number(n) === 1 || unit === 'g' || /^porci/.test(unit) ? all : ` · ${n} ${pluralEs(unit)}`);
   const q = Number(d.quantity);
   if (name.includes(' · ') || !q || q === 1) return name;
   return `${name} x${Math.round(q * 100) / 100}`;
@@ -471,7 +489,13 @@ export async function logFood({ userId, foodRow, quantity, momento, date, time, 
     payload[f.key] = (base === null || base === undefined) ? null : Number(base) * Number(quantity);
   });
   payload.micros = scaleMicros(foodRow.micros, quantity);
-  const { data, error } = await supabase.from('food_logs').insert(payload).select().single();
+  let { data, error } = await supabase.from('food_logs').insert(payload).select().single();
+  // Sin sql/fase2b.sql la tabla no acepta "Merienda" (error 23514 = regla check):
+  // se guarda como "Snack", que la app muestra igual como Merienda.
+  if (error && error.code === '23514' && momento === 'Merienda') {
+    console.warn('Falta correr sql/fase2b.sql: Merienda se guarda como Snack');
+    ({ data, error } = await supabase.from('food_logs').insert({ ...payload, momento: 'Snack' }).select().single());
+  }
   if (error) throw error;
   return data;
 }

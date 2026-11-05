@@ -1,4 +1,4 @@
-import { NUTRIENT_FIELDS, MICRO_FIELDS, foodLogLabel } from './foods.js?v=12';
+import { NUTRIENT_FIELDS, MICRO_FIELDS, foodLogLabel } from './foods.js?v=13';
 
 function fmtNum(v){
   if(v === null || v === undefined) return '—';
@@ -35,7 +35,7 @@ export function buildReportText({ displayName, fromDate, toDate, entries, goalsF
       if(e.kind === 'food'){
         hadFood = true;
         const d = e.data;
-        lines.push(`- [${e.time}] Comida (${d.momento}): ${foodLogLabel(d)}`);
+        lines.push(`- [${e.time}] Comida (${d.momento === 'Snack' ? 'Merienda' : d.momento}): ${foodLogLabel(d)}`);
         NUTRIENT_FIELDS.forEach(f => { if(d[f.key] != null) totals[f.key] += Number(d[f.key]); });
         MICRO_FIELDS.forEach(f => { const v = d.micros && d.micros[f.key]; if(v != null) micros[f.key] += Number(v); });
       } else if(e.type === 'gym'){

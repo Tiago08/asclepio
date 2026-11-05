@@ -15,20 +15,20 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/styles.css?v=12">
+<link rel="stylesheet" href="css/styles.css?v=13">
 <!-- Precarga en paralelo: sin esto el navegador descubre cada módulo
      solo después de bajar el anterior (una cascada en serie). -->
 <link rel="modulepreload" href="https://esm.sh/@supabase/supabase-js@2.119.0/es2022/supabase-js.bundle.mjs" crossorigin>
-<link rel="modulepreload" href="js/app.js?v=12">
-<link rel="modulepreload" href="js/supabaseClient.js?v=12">
-<link rel="modulepreload" href="js/config.js?v=12">
-<link rel="modulepreload" href="js/auth.js?v=12">
-<link rel="modulepreload" href="js/foods.js?v=12">
-<link rel="modulepreload" href="js/foodDict.js?v=12">
-<link rel="modulepreload" href="js/basics.js?v=12">
-<link rel="modulepreload" href="js/activity.js?v=12">
-<link rel="modulepreload" href="js/report.js?v=12">
-<link rel="modulepreload" href="js/health.js?v=12">
+<link rel="modulepreload" href="js/app.js?v=13">
+<link rel="modulepreload" href="js/supabaseClient.js?v=13">
+<link rel="modulepreload" href="js/config.js?v=13">
+<link rel="modulepreload" href="js/auth.js?v=13">
+<link rel="modulepreload" href="js/foods.js?v=13">
+<link rel="modulepreload" href="js/foodDict.js?v=13">
+<link rel="modulepreload" href="js/basics.js?v=13">
+<link rel="modulepreload" href="js/activity.js?v=13">
+<link rel="modulepreload" href="js/report.js?v=13">
+<link rel="modulepreload" href="js/health.js?v=13">
 </head>
 <body>
 
@@ -69,20 +69,20 @@
         <button class="logout-btn" id="logoutBtn">salir</button>
       </div>
     </div>
-    <div class="stat-strip" id="statStrip"></div>
   </header>
 
-  <!-- Hoy se lee de arriba hacia abajo: cómo voy → qué me falta hoy → registrar → qué hice -->
+  <!-- Hoy se lee de arriba hacia abajo: cómo voy → qué me falta hoy → comidas → lo demás -->
   <div class="panel active" id="panel-hoy">
     <div id="ringRow"></div>
     <section class="day-tiles" id="dayTiles" aria-label="Estado de hoy"></section>
-    <section class="log-area" aria-label="Registrar">
-      <button class="food-cta" id="foodCtaBtn" type="button"><span class="fc-ic" aria-hidden="true">🍽️</span>Agregar comida</button>
-      <div class="favorites-row" id="favoritesRow"></div>
-      <div class="log-pills" id="logPills"></div>
-    </section>
+    <h2 class="section-title">Comidas</h2>
+    <section class="meal-list" id="mealList" aria-label="Comidas de hoy"></section>
+    <div class="favorites-row" id="favoritesRow"></div>
     <div id="insightArea"></div>
-    <h2 class="section-title">Tu día</h2>
+    <div class="section-row">
+      <h2 class="section-title">Otros registros</h2>
+      <button class="section-add" id="otherLogBtn" type="button">+ Registrar</button>
+    </div>
     <div id="todayTimeline"></div>
   </div>
 
@@ -95,44 +95,50 @@
   </div>
 
   <div class="panel" id="panel-datos">
-    <div class="stat-grid" id="fullStats"></div>
-
-    <h2 class="section-title">Metas</h2>
-    <div class="data-card">
-      <h4>Tus metas diarias</h4>
-      <p>Las barras de la pantalla principal se miden contra estos números. Si las cambias, valen desde hoy: los días anteriores se siguen midiendo con las de antes.</p>
-      <div class="row-2">
-        <div class="field"><label>Calorías (kcal)</label><input type="number" id="goalKcal" inputmode="numeric" min="0"></div>
-        <div class="field"><label>Proteína (g)</label><input type="number" id="goalProtein" inputmode="numeric" min="0"></div>
-        <div class="field"><label>Carbos (g)</label><input type="number" id="goalCarbs" inputmode="numeric" min="0"></div>
-        <div class="field"><label>Grasa (g)</label><input type="number" id="goalFat" inputmode="numeric" min="0"></div>
-        <div class="field"><label>Agua (ml)</label><input type="number" id="goalWater" inputmode="numeric" min="0" step="250"></div>
+    <!-- Objetivo en 3 pasos: tus datos → qué quieres → tu meta. Un solo botón. -->
+    <h2 class="section-title">Tu objetivo</h2>
+    <div class="data-card goal-card">
+      <div class="step">
+        <div class="step-h"><span class="step-n">1</span>Tus datos <span class="step-note">solo los ves tú</span></div>
+        <div class="chip-row sex-chips" id="sexChips">
+          <button type="button" class="chip" data-sex="hombre">Hombre</button>
+          <button type="button" class="chip" data-sex="mujer">Mujer</button>
+        </div>
+        <div class="row-3">
+          <div class="field"><label>Edad</label><input type="number" id="bodyAge" inputmode="numeric" min="10" max="100" placeholder="años"></div>
+          <div class="field"><label>Altura</label><input type="number" id="bodyHeight" inputmode="numeric" min="100" max="250" placeholder="cm"></div>
+          <div class="field"><label>Peso</label><input type="text" id="bodyWeight" inputmode="decimal" autocomplete="off" placeholder="kg"></div>
+        </div>
       </div>
-      <button class="btn-primary" id="saveGoalsBtn" style="--cat-color: var(--accent)">Guardar metas</button>
+
+      <div class="step">
+        <div class="step-h"><span class="step-n">2</span>¿Qué quieres?</div>
+        <div class="pace-list" id="paceList"></div>
+        <div class="field"><label>Días de entreno por semana</label>
+          <div class="chip-row train-chips" id="trainChips"></div></div>
+      </div>
+
+      <div class="step">
+        <div class="step-h"><span class="step-n">3</span>Tu meta diaria</div>
+        <div class="goal-result" id="goalResult"></div>
+        <button class="btn-primary" id="saveObjectiveBtn" type="button" style="--cat-color: var(--accent)">Guardar objetivo</button>
+      </div>
+
+      <details class="more-fields manual-goals">
+        <summary>Ajustar metas a mano</summary>
+        <p>Si las cambias, valen desde hoy: los días anteriores se siguen midiendo con las de antes.</p>
+        <div class="row-2">
+          <div class="field"><label>Calorías (kcal)</label><input type="number" id="goalKcal" inputmode="numeric" min="0"></div>
+          <div class="field"><label>Proteína (g)</label><input type="number" id="goalProtein" inputmode="numeric" min="0"></div>
+          <div class="field"><label>Carbos (g)</label><input type="number" id="goalCarbs" inputmode="numeric" min="0"></div>
+          <div class="field"><label>Grasa (g)</label><input type="number" id="goalFat" inputmode="numeric" min="0"></div>
+          <div class="field"><label>Agua (ml)</label><input type="number" id="goalWater" inputmode="numeric" min="0" step="250"></div>
+        </div>
+        <button class="btn-ghost" id="saveGoalsBtn" type="button">Guardar metas a mano</button>
+      </details>
     </div>
 
-    <div class="data-card">
-      <h4>Perfil físico</h4>
-      <p>Con esto la app calcula tus metas. Solo lo ves tú.</p>
-      <div class="row-2">
-        <div class="field"><label>Sexo</label>
-          <select id="bodySex"><option value="">—</option><option value="hombre">Hombre</option><option value="mujer">Mujer</option></select></div>
-        <div class="field"><label>Edad</label><input type="number" id="bodyAge" inputmode="numeric" min="10" max="100"></div>
-        <div class="field"><label>Altura (cm)</label><input type="number" id="bodyHeight" inputmode="numeric" min="100" max="250"></div>
-        <div class="field"><label>Objetivo</label>
-          <select id="bodyObjective"><option value="perder">Perder grasa</option><option value="mantener">Mantener</option><option value="ganar">Ganar músculo</option></select></div>
-      </div>
-      <div class="field"><label>Días de entreno por semana</label>
-        <select id="bodyTraining">
-          <option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option>
-          <option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option>
-        </select></div>
-      <div class="calc-box" id="goalSuggestion"></div>
-      <button class="btn-primary hidden" id="applySuggestionBtn" style="--cat-color: var(--accent); margin-bottom: 10px;">Usar como mis metas</button>
-      <button class="btn-ghost" id="saveBodyBtn">Guardar perfil físico</button>
-    </div>
-
-    <h2 class="section-title">Cuerpo</h2>
+    <h2 class="section-title">Peso</h2>
     <div class="data-card">
       <h4>Peso corporal</h4>
       <p>Uno por día: si te pesas otra vez hoy, se reemplaza.</p>
@@ -193,6 +199,6 @@
     }
   })();
 </script>
-<script type="module" src="js/app.js?v=12"></script>
+<script type="module" src="js/app.js?v=13"></script>
 </body>
 </html>

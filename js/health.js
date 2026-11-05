@@ -1,6 +1,6 @@
 // Fase 2: metas por día, perfil físico, peso, suplementos, agua y combos.
 // Solo acceso a datos y cálculos; las pantallas están en app.js.
-import { supabase } from './supabaseClient.js?v=12';
+import { supabase } from './supabaseClient.js?v=13';
 
 function must({ data, error }) {
   if (error) throw error;
@@ -47,9 +47,36 @@ export async function getBodyProfile(userId) {
 }
 
 export async function saveBodyProfile(userId, fields) {
-  return must(await supabase.from('body_profiles')
-    .upsert({ user_id: userId, ...fields, updated_at: new Date().toISOString() }, { onConflict: 'user_id' })
-    .select().single());
+  const row = { user_id: userId, ...fields, updated_at: new Date().toISOString() };
+  const res = await supabase.from('body_profiles').upsert(row, { onConflict: 'user_id' }).select().single();
+  // Sin sql/fase2b.sql no existe la columna del ritmo: se guarda lo demás y se avisa.
+  if (res.error && 'pace_kg_week' in row && /pace_kg_week/.test(res.error.message || '')) {
+    const { pace_kg_week, ...rest } = row;
+    const saved = must(await supabase.from('body_profiles').upsert(rest, { onConflict: 'user_id' }).select().single());
+    const err = new Error('Falta correr sql/fase2b.sql en Supabase: el ritmo no se guardó (las metas sí).');
+    err.saved = { ...saved, pace_kg_week };
+    throw err;
+  }
+  return must(res);
+}
+
+/** Ritmos que ofrece la app, en kg por semana (negativo = bajar). */
+export const PACES = [
+  { kg: -0.75, label: 'Bajar rápido', sub: '−0,75 kg por semana' },
+  { kg: -0.25, label: 'Bajar suave', sub: '−0,25 kg por semana · fácil de sostener' },
+  { kg: 0, label: 'Mantener', sub: 'mismo peso, mejor composición' },
+  { kg: 0.25, label: 'Subir suave', sub: '+0,25 kg por semana · poca grasa' },
+  { kg: 0.5, label: 'Subir rápido', sub: '+0,5 kg por semana' }
+];
+
+/** Ritmo del perfil; los perfiles de antes de fase2b solo tienen "objective". */
+export function paceOf(body) {
+  if (body && body.pace_kg_week != null) return Number(body.pace_kg_week);
+  return { perder: -0.25, ganar: 0.25 }[body && body.objective] ?? 0;
+}
+
+export function objectiveOf(pace) {
+  return pace < 0 ? 'perder' : pace > 0 ? 'ganar' : 'mantener';
 }
 
 // Factor de actividad según días de entreno por semana
@@ -65,8 +92,10 @@ function activityFactor(days) {
  * Metas sugeridas a partir del perfil físico y el peso.
  * 1. Gasto en reposo (Mifflin-St Jeor): 10·kg + 6,25·cm − 5·edad + 5 (hombre) o − 161 (mujer).
  * 2. × factor de actividad = gasto diario.
- * 3. Objetivo: perder −20 %, mantener igual, ganar +10 %.
- * 4. Proteína por kg (2,2 perder · 1,8 mantener · 2,0 ganar), grasa 25 % de las kcal,
+ * 3. Ritmo: 1 kg de grasa ≈ 7700 kcal, así que cada kg/semana son 1100 kcal/día
+ *    de déficit o superávit (−0,25 kg/sem ≈ −275 kcal/día).
+ *    Piso de seguridad: nunca menos que el gasto en reposo ni que 1500 (hombre) / 1200 (mujer).
+ * 4. Proteína por kg (2,2 bajando · 1,8 mantener · 2,0 subiendo), grasa 25 % de las kcal,
  *    carbos = lo que sobra. Agua: 35 ml por kg.
  * Devuelve null si falta algún dato.
  */
@@ -75,15 +104,20 @@ export function suggestGoals(body, weightKg, year = new Date().getFullYear()) {
   const age = year - body.birth_year;
   const bmr = 10 * weightKg + 6.25 * Number(body.height_cm) - 5 * age + (body.sex === 'hombre' ? 5 : -161);
   const tdee = bmr * activityFactor(Number(body.training_days ?? 3));
-  const adj = { perder: 0.8, mantener: 1, ganar: 1.1 }[body.objective] ?? 1;
-  const kcal = Math.round((tdee * adj) / 10) * 10;
-  const protPerKg = { perder: 2.2, mantener: 1.8, ganar: 2.0 }[body.objective] ?? 1.8;
+  const pace = paceOf(body);
+  const floor = Math.max(bmr, body.sex === 'hombre' ? 1500 : 1200);
+  const wanted = tdee + (pace * 7700) / 7;
+  const clamped = wanted < floor;
+  const kcal = Math.round(Math.max(wanted, floor) / 10) * 10;
+  const protPerKg = pace < 0 ? 2.2 : pace > 0 ? 2.0 : 1.8;
   const protein = Math.round(weightKg * protPerKg);
   const fat = Math.round((kcal * 0.25) / 9);
   const carbs = Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4));
   const water = Math.round((weightKg * 35) / 250) * 250;
   return {
-    bmr: Math.round(bmr), tdee: Math.round(tdee), age,
+    bmr: Math.round(bmr), tdee: Math.round(tdee), age, pace, clamped,
+    // ritmo real con las kcal finales (cambia si se aplicó el piso)
+    realPace: Math.round(((kcal - tdee) * 7 / 7700) * 100) / 100,
     goals: { goal_kcal: kcal, goal_protein_g: protein, goal_carbs_g: carbs, goal_fat_g: fat, goal_water_ml: water }
   };
 }

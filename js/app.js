@@ -1,21 +1,21 @@
-import { supabase } from './supabaseClient.js?v=12';
+import { supabase } from './supabaseClient.js?v=13';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js?v=12';
+} from './auth.js?v=13';
 import {
   NUTRIENT_FIELDS, MICRO_FIELDS, searchUsda, searchLocalFoods, searchFavorites, updateFood,
-  cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel
-} from './foods.js?v=12';
-import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=12';
-import { buildReportText, downloadText } from './report.js?v=12';
-import { BASICS, searchBasics } from './basics.js?v=12';
+  cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel, pluralEs
+} from './foods.js?v=13';
+import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=13';
+import { buildReportText, downloadText } from './report.js?v=13';
+import { BASICS, searchBasics } from './basics.js?v=13';
 import {
-  getGoalHistory, saveGoalsFrom, goalsForDate, getBodyProfile, saveBodyProfile, suggestGoals,
+  getGoalHistory, saveGoalsFrom, goalsForDate, getBodyProfile, saveBodyProfile, suggestGoals, PACES, paceOf, objectiveOf,
   getWeights, saveWeight, deleteWeight, getSupplements, addSupplement, retireSupplement,
   getSupplementLogs, getSupplementLogsInRange, setSupplementTaken, getWaterLogs, addWater, deleteWater,
   electrolyteTotals, getCombos, createCombo, deleteCombo
-} from './health.js?v=12';
+} from './health.js?v=13';
 
 /* ================= utilidades de hora ================= */
 
@@ -24,12 +24,59 @@ function todayStr(){ const d = new Date(); return d.getFullYear()+'-'+pad(d.getM
 function nowStr(){ const d = new Date(); return pad(d.getHours())+':'+pad(d.getMinutes()); }
 function daysAgoStr(n){ const d = new Date(); d.setDate(d.getDate()-n); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
 
+// Comidas del día, en el orden en que pasan. "Snack" es el nombre viejo de
+// Merienda: los registros de antes se muestran como Merienda.
+const MEALS = ['Desayuno', 'Almuerzo', 'Merienda', 'Cena'];
+function mealOf(momento){ return momento === 'Snack' ? 'Merienda' : (MEALS.includes(momento) ? momento : 'Merienda'); }
+
 function guessMomento(){
   const h = new Date().getHours();
   if(h < 11) return 'Desayuno';
-  if(h < 16) return 'Almuerzo';
-  if(h < 21) return 'Cena';
-  return 'Snack';
+  if(h < 15) return 'Almuerzo';
+  if(h < 18) return 'Merienda';
+  return 'Cena';
+}
+
+/* "Cuándo" de un registro de comida: una línea ("Almuerzo · hoy 13:00") que
+   se abre para cambiar comida, fecha u hora. Casi nunca cambia, así que no
+   ocupa media hoja. Devuelve una función que lee lo elegido. */
+function whenHtml(momento){
+  return `
+    <div class="when-line">
+      <span id="whenText"></span>
+      <button class="sf-change" id="whenChangeBtn" type="button">cambiar</button>
+    </div>
+    <div class="when-fields hidden" id="whenFields">
+      <div class="chip-row when-meals">${MEALS.map(m => `<button type="button" class="chip${m === momento ? ' selected' : ''}" data-meal="${m}">${m}</button>`).join('')}</div>
+      <div class="row-2">
+        <div class="field"><label>Fecha</label><input type="date" id="f_fecha" value="${todayStr()}"></div>
+        <div class="field"><label>Hora</label><input type="time" id="f_hora" value="${nowStr()}"></div>
+      </div>
+    </div>`;
+}
+function wireWhen(card, momento){
+  let meal = momento;
+  const fecha = card.querySelector('#f_fecha'), hora = card.querySelector('#f_hora');
+  const text = card.querySelector('#whenText');
+  const paint = () => {
+    const d = fecha.value || todayStr();
+    const day = d === todayStr() ? 'hoy' : new Date(d + 'T12:00:00').toLocaleDateString('es-VE', { weekday:'short', day:'numeric', month:'short' });
+    text.innerHTML = `<b>${meal}</b> · ${day} ${escapeHtml(hora.value || nowStr())}`;
+  };
+  card.querySelector('#whenChangeBtn').addEventListener('click', ev => {
+    card.querySelector('#whenFields').classList.toggle('hidden');
+    ev.currentTarget.textContent = card.querySelector('#whenFields').classList.contains('hidden') ? 'cambiar' : 'listo';
+  });
+  card.querySelectorAll('[data-meal]').forEach(b => b.addEventListener('click', () => {
+    card.querySelectorAll('[data-meal]').forEach(x => x.classList.remove('selected'));
+    b.classList.add('selected');
+    meal = b.dataset.meal;
+    paint();
+  }));
+  fecha.addEventListener('input', paint);
+  hora.addEventListener('input', paint);
+  paint();
+  return () => ({ momento: meal, date: fecha.value || todayStr(), time: hora.value || nowStr() });
 }
 
 // momento del día para el registro de energía, según la hora del teléfono
@@ -193,7 +240,6 @@ const loginStepCode = document.getElementById('loginStepCode');
 const loginStatus = document.getElementById('loginStatus');
 const logoutBtn = document.getElementById('logoutBtn');
 const todayDateEl = document.getElementById('todayDate');
-const statStrip = document.getElementById('statStrip');
 const ringRow = document.getElementById('ringRow');
 const insightArea = document.getElementById('insightArea');
 const favoritesRow = document.getElementById('favoritesRow');
@@ -229,7 +275,26 @@ function escapeHtml(str){
 
 /* ================= bottom sheet ================= */
 
+/* Teclado de iOS: la pantalla "de diseño" (innerHeight) no cambia, solo se
+   achica la parte visible (visualViewport). Como un osciloscopio con la
+   pantalla tapada a medias: medimos cuánto quedó tapado (--kb) y cuánto se ve
+   (--vvh) y la hoja se acomoda a esa ventana. */
+function syncViewport(){
+  const vv = window.visualViewport;
+  if(!vv) return;
+  const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+  document.documentElement.style.setProperty('--kb', kb + 'px');
+  document.documentElement.style.setProperty('--vvh', Math.round(vv.height) + 'px');
+  sheet.classList.toggle('kb-open', kb > 80);
+}
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize', syncViewport);
+  window.visualViewport.addEventListener('scroll', syncViewport);
+  syncViewport();
+}
+
 function openSheet(){
+  sheet.classList.remove('tall');
   sheet.classList.remove('hidden');
   sheetBackdrop.classList.remove('hidden');
   document.body.classList.add('sheet-open');
@@ -241,6 +306,8 @@ function resetForm(){
 }
 function closeForm(){
   formArea.innerHTML = '';
+  pendingMomento = null;
+  sheet.classList.remove('tall');
   sheet.classList.add('hidden');
   sheetBackdrop.classList.add('hidden');
   document.body.classList.remove('sheet-open');
@@ -605,17 +672,25 @@ function foodListHtml(items, offset = 0){
     </div>`).join('');
 }
 
-function openFoodForm(){
+// comida a la que se está agregando (el "+" de Desayuno, Almuerzo...); null = según la hora
+let pendingMomento = null;
+
+function openFoodForm(momento){
+  // también se usa directo como listener: entonces llega un evento, no un texto
+  if(typeof momento === 'string') pendingMomento = momento;
   resetForm();
+  sheet.classList.add('tall');
   const card = document.createElement('div');
   card.className = 'form-card';
   card.style.setProperty('--cat-color', CAT_COLOR.comida);
   const inCombo = !!comboDraft;
+  const title = inCombo ? 'Agregar al combo' : (pendingMomento || 'Comida');
   card.innerHTML = `
-    <h3><span>${inCombo ? '🧺' : '🍽️'}</span> ${inCombo ? 'Agregar al combo' : 'Comida'}</h3>
-    <div class="field">
-      <label>Buscar alimento</label>
-      <input type="search" id="foodSearchInput" placeholder="arroz, cambur, Savoy..." autocomplete="off" enterkeyhint="search">
+    <div class="search-sticky">
+      <h3><span>${inCombo ? '🧺' : '🍽️'}</span> ${title}</h3>
+      <div class="field">
+        <input type="search" id="foodSearchInput" placeholder="Buscar: arroz, cambur, Savoy..." aria-label="Buscar alimento" autocomplete="off" enterkeyhint="search">
+      </div>
     </div>
     <div id="foodSearchResults"></div>
     <div class="food-extra-actions">
@@ -778,8 +853,9 @@ function amountLabel(unit, amount){
   const n = Number.isInteger(amount) ? amount : Math.round(amount * 100) / 100;
   if(unit.label === 'g') return `${n} g`;
   if(unit.grams == null) return n === 1 ? '1 porción' : `${n} porciones`;
-  return `${n} ${unit.label}`;
+  return `${n} ${n === 1 ? unit.label : pluralEs(unit.label)}`;
 }
+
 
 async function openQuantityStep(foodResult){
   resetForm();
@@ -790,7 +866,7 @@ async function openQuantityStep(foodResult){
   const f = withUnits(foodResult);
   const units = unitOptions(f);
   let unit = units[0];
-  const momento = guessMomento();
+  const momento = pendingMomento || guessMomento();
   const inCombo = !!comboDraft;
   const canEditUnits = f.source === 'custom' && f.id;
   card.innerHTML = `
@@ -811,24 +887,15 @@ async function openQuantityStep(foodResult){
       </div>
     </div>
     <div class="calc-box" id="qtyCalc"></div>
-    ${inCombo ? '' : `
-    <div class="row-2">
-      <div class="field"><label>Fecha</label><input type="date" id="f_fecha" value="${todayStr()}"></div>
-      <div class="field"><label>Hora</label><input type="time" id="f_hora" value="${nowStr()}"></div>
-    </div>
-    <div class="field">
-      <label>Momento</label>
-      <select id="f_momento">
-        ${['Desayuno','Almuerzo','Cena','Snack'].map(o => `<option value="${o}" ${o===momento?'selected':''}>${o}</option>`).join('')}
-      </select>
-    </div>`}
-    <div class="form-actions">
+    ${inCombo ? '' : whenHtml(momento)}
+    <div class="form-actions sticky">
       <button class="btn-ghost" id="cancelBtn">${inCombo ? 'Volver al combo' : 'Cancelar'}</button>
       <button class="btn-primary" id="saveBtn" style="--cat-color: var(--c-comida)">${inCombo ? 'Agregar al combo' : 'Guardar'}</button>
     </div>
   `;
   formArea.appendChild(card);
   if(canEditUnits) card.querySelector('#editUnitsBtn').addEventListener('click', () => openUnitsEditor(f));
+  const readWhen = inCombo ? null : wireWhen(card, momento);
 
   const qtyInput = card.querySelector('#f_qty');
   const calc = card.querySelector('#qtyCalc');
@@ -875,9 +942,7 @@ async function openQuantityStep(foodResult){
         userId: user.id, foodRow,
         quantity: quantityFor(f, unit, amount),
         label: `${foodRow.name} · ${amountLabel(unit, amount)}`,
-        momento: card.querySelector('#f_momento').value,
-        date: card.querySelector('#f_fecha').value || todayStr(),
-        time: card.querySelector('#f_hora').value || nowStr()
+        ...readWhen()
       });
       closeForm();
       showToast('Comida registrada');
@@ -1010,30 +1075,22 @@ function openComboLog(combo){
   const card = document.createElement('div');
   card.className = 'form-card';
   card.style.setProperty('--cat-color', CAT_COLOR.comida);
-  const momento = guessMomento();
+  const momento = pendingMomento || guessMomento();
   card.innerHTML = `
     <h3><span>🧺</span> ${escapeHtml(combo.name)}</h3>
     <div class="combo-items">${combo.items.map(it => `
       <div class="combo-item"><span>${escapeHtml(it.label)}</span>
         <span class="ci-right mono">${it.food.kcal != null ? Math.round(it.food.kcal * it.quantity) + ' kcal' : ''}</span></div>`).join('')}</div>
     <div class="calc-box"><b>${Math.round(comboKcal(combo))} kcal</b> en total</div>
-    <div class="row-2">
-      <div class="field"><label>Fecha</label><input type="date" id="f_fecha" value="${todayStr()}"></div>
-      <div class="field"><label>Hora</label><input type="time" id="f_hora" value="${nowStr()}"></div>
-    </div>
-    <div class="field">
-      <label>Momento</label>
-      <select id="f_momento">
-        ${['Desayuno','Almuerzo','Cena','Snack'].map(o => `<option value="${o}" ${o===momento?'selected':''}>${o}</option>`).join('')}
-      </select>
-    </div>
-    <div class="form-actions">
+    ${whenHtml(momento)}
+    <div class="form-actions sticky">
       <button class="btn-ghost" id="cancelBtn">Volver</button>
       <button class="btn-primary" id="saveBtn">Registrar combo</button>
     </div>
     <button class="btn-link" id="delComboBtn" type="button">Eliminar este combo</button>`;
   formArea.appendChild(card);
   card.querySelector('#cancelBtn').addEventListener('click', openFoodForm);
+  const readWhen = wireWhen(card, momento);
   card.querySelector('#delComboBtn').addEventListener('click', async (ev) => {
     const btn = ev.currentTarget;
     if(btn.dataset.confirm !== '1'){ btn.dataset.confirm = '1'; btn.textContent = 'Toca otra vez para eliminar (tus registros no se borran)'; return; }
@@ -1048,12 +1105,7 @@ function openComboLog(combo){
   card.querySelector('#saveBtn').addEventListener('click', async (ev) => {
     const btn = ev.currentTarget;
     btn.disabled = true; btn.textContent = 'Guardando...';
-    const common = {
-      userId: user.id,
-      momento: card.querySelector('#f_momento').value,
-      date: card.querySelector('#f_fecha').value || todayStr(),
-      time: card.querySelector('#f_hora').value || nowStr()
-    };
+    const common = { userId: user.id, ...readWhen() };
     let done = 0;
     try{
       // uno por uno: si falla a la mitad, se sabe cuántos quedaron
@@ -1079,7 +1131,7 @@ function openQuickAddForm(){
   const card = document.createElement('div');
   card.className = 'form-card';
   card.style.setProperty('--cat-color', CAT_COLOR.comida);
-  const momento = guessMomento();
+  const momento = pendingMomento || guessMomento();
   card.innerHTML = `
     <h3><span>⚡</span> Agregar rápido</h3>
     <p class="form-hint">Para algo que comes una sola vez: se registra en tu día, pero no se guarda como alimento.</p>
@@ -1090,23 +1142,15 @@ function openQuickAddForm(){
       <div class="field"><label>Carbos (g)</label><input type="number" id="qa_carbs" inputmode="decimal" min="0" step="any" placeholder="opcional"></div>
       <div class="field"><label>Grasa (g)</label><input type="number" id="qa_fat" inputmode="decimal" min="0" step="any" placeholder="opcional"></div>
     </div>
-    <div class="row-2">
-      <div class="field"><label>Fecha</label><input type="date" id="f_fecha" value="${todayStr()}"></div>
-      <div class="field"><label>Hora</label><input type="time" id="f_hora" value="${nowStr()}"></div>
-    </div>
-    <div class="field">
-      <label>Momento</label>
-      <select id="f_momento">
-        ${['Desayuno','Almuerzo','Cena','Snack'].map(o => `<option value="${o}" ${o===momento?'selected':''}>${o}</option>`).join('')}
-      </select>
-    </div>
-    <div class="form-actions">
+    ${whenHtml(momento)}
+    <div class="form-actions sticky">
       <button class="btn-ghost" id="cancelBtn">Volver</button>
       <button class="btn-primary" id="saveBtn" style="--cat-color: var(--c-comida)">Guardar</button>
     </div>
   `;
   formArea.appendChild(card);
   card.querySelector('#cancelBtn').addEventListener('click', openFoodForm);
+  const readWhen = wireWhen(card, momento);
   card.querySelector('#saveBtn').addEventListener('click', async () => {
     const num = id => { const v = card.querySelector(id).value; return v === '' ? null : Number(v); };
     const kcal = num('#qa_kcal');
@@ -1118,10 +1162,7 @@ function openQuickAddForm(){
     saveBtn.disabled = true; saveBtn.textContent = 'Guardando...';
     try{
       await logFood({
-        userId: user.id, foodRow, quantity: 1,
-        momento: card.querySelector('#f_momento').value,
-        date: card.querySelector('#f_fecha').value || todayStr(),
-        time: card.querySelector('#f_hora').value || nowStr()
+        userId: user.id, foodRow, quantity: 1, ...readWhen()
       });
       closeForm();
       showToast('Comida registrada');
@@ -1238,7 +1279,7 @@ function entryRow(e){
   let summary = '';
   if(e.kind === 'food'){
     const d = e.data;
-    summary = `${d.momento}: ${escapeHtml(foodLogLabel(d))}${d.kcal != null ? ` · ${Math.round(d.kcal)} kcal` : ''}`;
+    summary = `${mealOf(d.momento)}: ${escapeHtml(foodLogLabel(d))}${d.kcal != null ? ` · ${Math.round(d.kcal)} kcal` : ''}`;
   } else {
     const t = TYPES[e.type];
     summary = escapeHtml(t ? t.summary(e.data) : '');
@@ -1260,21 +1301,49 @@ async function renderToday(){
   try{
     const list = await getEntriesForDate(user.id, todayStr());
     todayEntries = list;
-    if(list.length === 0){
-      wrap.innerHTML = `<div class="empty-state">Lo que registres hoy aparecerá aquí, en orden.</div>`;
-    } else {
-      wrap.innerHTML = `<div class="timeline">${list.map(entryRow).join('')}</div>`;
-    }
+    const others = list.filter(e => e.kind !== 'food');
+    wrap.innerHTML = others.length
+      ? `<div class="timeline">${others.map(entryRow).join('')}</div>`
+      : `<div class="search-empty">Baño, energía y notas aparecerán aquí.</div>`;
     const foods = list.filter(e => e.kind === 'food');
     todayFoodRows = foods.map(e => e.data);
     renderRings(foods);
+    renderMeals(foods);
   }catch(err){
     wrap.innerHTML = `<div class="empty-state">Error cargando: ${escapeHtml(err.message)}</div>`;
     todayEntries = [];
     todayFoodRows = [];
     renderRings([]);
+    renderMeals([]);
   }
   renderDaily();
+}
+
+/* ---- comidas del día agrupadas: Desayuno, Almuerzo, Merienda, Cena ---- */
+
+const mealList = document.getElementById('mealList');
+const MEAL_ICON = { Desayuno: '☕', Almuerzo: '🍛', Merienda: '🍎', Cena: '🌙' };
+
+function renderMeals(foods){
+  mealList.innerHTML = MEALS.map(m => {
+    const items = foods.filter(e => mealOf(e.data.momento) === m);
+    const kcal = items.reduce((s, e) => s + (e.data.kcal != null ? Number(e.data.kcal) : 0), 0);
+    return `
+      <div class="meal${items.length ? '' : ' is-empty'}">
+        <div class="meal-h">
+          <span class="meal-name"><span aria-hidden="true">${MEAL_ICON[m]}</span> ${m}</span>
+          ${items.length ? `<span class="meal-kcal mono">${Math.round(kcal)} kcal</span>` : ''}
+          <button class="meal-add" data-add-meal="${m}" type="button" aria-label="Agregar a ${m}">+</button>
+        </div>
+        ${items.length ? `<div class="meal-items">${items.map(e => `
+          <div class="meal-item">
+            <span class="mi-name">${escapeHtml(foodLogLabel(e.data))}</span>
+            <span class="mi-kcal mono">${e.data.kcal != null ? Math.round(e.data.kcal) : '–'}</span>
+            <button class="mi-del" data-del-food="${e.id}" type="button" aria-label="Eliminar ${escapeHtml(foodLogLabel(e.data))}">×</button>
+          </div>`).join('')}</div>` : ''}
+      </div>`;
+  }).join('');
+  mealList.querySelectorAll('[data-add-meal]').forEach(b => b.addEventListener('click', () => openFoodForm(b.dataset.addMeal)));
 }
 
 /* ================= hoy: mosaicos de estado del día ================= */
@@ -1363,13 +1432,23 @@ function renderDaily(){
 /* ---- registrar: comida (lo más frecuente) y el resto en pastillas ---- */
 
 function renderLogActions(){
-  document.getElementById('foodCtaBtn').onclick = openFoodForm;
-  const pills = ['bano', 'energia', 'nota'];
-  const wrap = document.getElementById('logPills');
-  wrap.innerHTML = pills.map(k => `
-    <button class="log-pill" data-log="${k}" type="button" style="--cat-color:${TYPES[k].color}">
-      <span aria-hidden="true">${TYPES[k].icon}</span>${TYPES[k].label}</button>`).join('');
-  wrap.querySelectorAll('[data-log]').forEach(b => b.addEventListener('click', () => openActivityForm(b.dataset.log)));
+  document.getElementById('otherLogBtn').onclick = openOtherLogPicker;
+}
+
+/** Un solo botón para lo poco frecuente: Baño, Energía o Nota. */
+function openOtherLogPicker(){
+  resetForm();
+  const card = document.createElement('div');
+  card.className = 'form-card';
+  card.innerHTML = `
+    <h3>¿Qué quieres registrar?</h3>
+    <div class="check-list">${['bano', 'energia', 'nota'].map(k => `
+      <button class="check-row" data-log="${k}" type="button" style="--cat-color:${TYPES[k].color}">
+        <span class="pick-ic" aria-hidden="true">${TYPES[k].icon}</span><span>${TYPES[k].label}</span></button>`).join('')}</div>
+    <div class="form-actions"><button class="btn-ghost" id="cancelBtn" type="button">Cancelar</button></div>`;
+  formArea.appendChild(card);
+  card.querySelectorAll('[data-log]').forEach(b => b.addEventListener('click', () => openActivityForm(b.dataset.log)));
+  card.querySelector('#cancelBtn').addEventListener('click', closeForm);
 }
 
 /* ---- agua ---- */
@@ -1654,12 +1733,6 @@ function renderRings(foodEntries){
 /* ================= stats + insights ================= */
 
 async function renderStats(){
-  statStrip.innerHTML = `<span class="stat-chip">racha <b>${profile.streak_current}d</b></span>`;
-  const fullStats = document.getElementById('fullStats');
-  fullStats.innerHTML = `
-    <div class="stat-tile"><div class="v mono">${profile.streak_current}</div><div class="l">racha actual (días)</div></div>
-    <div class="stat-tile"><div class="v mono">${profile.streak_best}</div><div class="l">mejor racha (días)</div></div>`;
-
   try{
     const list = await getEntriesInRange(user.id, daysAgoStr(13), todayStr());
     await renderInsight(list);
@@ -1777,72 +1850,129 @@ document.getElementById('saveGoalsBtn').addEventListener('click', async () => {
   }
   try{
     await saveGoals(goals);
+    renderSuggestion();
     showToast('Metas guardadas desde hoy');
   }catch(err){ showToast('Error: ' + err.message); }
 });
 
-/* ================= perfil físico y metas sugeridas ================= */
+/* ================= objetivo: datos → qué quieres → meta ================= */
+/* Como un divisor de tensión: entras con tus datos (la entrada), eliges el
+   ritmo (la resistencia) y la meta sale sola. Todo se recalcula al tocar. */
 
 function latestWeight(){ return weights.length ? Number(weights[0].weight_kg) : null; }
 
+const objState = { sex: null, pace: 0, training: 3 };
+
 function fillBodyInputs(){
   const b = bodyProfile || {};
-  document.getElementById('bodySex').value = b.sex || '';
+  objState.sex = b.sex || null;
+  objState.pace = paceOf(b);
+  objState.training = Number(b.training_days ?? 3);
   document.getElementById('bodyAge').value = b.birth_year ? new Date().getFullYear() - b.birth_year : '';
   document.getElementById('bodyHeight').value = b.height_cm || '';
-  document.getElementById('bodyObjective').value = b.objective || 'mantener';
-  document.getElementById('bodyTraining').value = String(b.training_days ?? 3);
+  const kg = latestWeight();
+  document.getElementById('bodyWeight').value = kg ? String(kg).replace('.', ',') : '';
+  renderObjectiveChoices();
   renderSuggestion();
+}
+
+function readWeightInput(){
+  const kg = Number(String(document.getElementById('bodyWeight').value).replace(',', '.'));
+  return kg > 20 && kg < 400 ? kg : null;
 }
 
 function readBodyInputs(){
   const age = Number(document.getElementById('bodyAge').value);
   return {
-    sex: document.getElementById('bodySex').value || null,
+    sex: objState.sex,
     birth_year: age > 0 ? new Date().getFullYear() - age : null,
     height_cm: Number(document.getElementById('bodyHeight').value) || null,
-    objective: document.getElementById('bodyObjective').value,
-    training_days: Number(document.getElementById('bodyTraining').value)
+    objective: objectiveOf(objState.pace),
+    pace_kg_week: objState.pace,
+    training_days: objState.training
   };
 }
 
+function renderObjectiveChoices(){
+  document.querySelectorAll('#sexChips [data-sex]').forEach(b => b.classList.toggle('selected', b.dataset.sex === objState.sex));
+  document.getElementById('paceList').innerHTML = PACES.map(p => `
+    <button type="button" class="pace-opt${p.kg === objState.pace ? ' selected' : ''}" data-pace="${p.kg}">
+      <span class="po-dot" aria-hidden="true"></span>
+      <span class="po-text"><span class="po-label">${p.label}</span><span class="po-sub">${p.sub}</span></span>
+    </button>`).join('');
+  document.getElementById('trainChips').innerHTML = [0,1,2,3,4,5,6,7].map(n =>
+    `<button type="button" class="chip${n === objState.training ? ' selected' : ''}" data-train="${n}">${n}</button>`).join('');
+}
+
+document.getElementById('sexChips').addEventListener('click', e => {
+  const b = e.target.closest('[data-sex]'); if(!b) return;
+  objState.sex = b.dataset.sex; renderObjectiveChoices(); renderSuggestion();
+});
+document.getElementById('paceList').addEventListener('click', e => {
+  const b = e.target.closest('[data-pace]'); if(!b) return;
+  objState.pace = Number(b.dataset.pace); renderObjectiveChoices(); renderSuggestion();
+});
+document.getElementById('trainChips').addEventListener('click', e => {
+  const b = e.target.closest('[data-train]'); if(!b) return;
+  objState.training = Number(b.dataset.train); renderObjectiveChoices(); renderSuggestion();
+});
+['bodyAge','bodyHeight','bodyWeight'].forEach(id => document.getElementById(id).addEventListener('input', renderSuggestion));
+
 let lastSuggestion = null;
 function renderSuggestion(){
-  const box = document.getElementById('goalSuggestion');
-  const btn = document.getElementById('applySuggestionBtn');
-  const kg = latestWeight();
+  const box = document.getElementById('goalResult');
+  const btn = document.getElementById('saveObjectiveBtn');
+  const kg = readWeightInput();
   const s = suggestGoals(readBodyInputs(), kg);
   lastSuggestion = s;
-  btn.classList.toggle('hidden', !s);
+  btn.disabled = !s;
   if(!s){
-    box.innerHTML = kg ? 'Completa sexo, edad y altura para calcular tus metas.' : 'Registra tu peso (abajo) y completa tus datos para calcular tus metas.';
+    const missing = [!objState.sex && 'sexo', !document.getElementById('bodyAge').value && 'edad',
+      !document.getElementById('bodyHeight').value && 'altura', !kg && 'peso'].filter(Boolean);
+    box.innerHTML = `<div class="gr-empty">Completa ${missing.join(', ')} en el paso 1 para calcular tu meta.</div>`;
     return;
   }
   const g = s.goals;
-  box.innerHTML = `Gasto en reposo <b>${s.bmr}</b> kcal · gasto diario <b>${s.tdee}</b> kcal (con ${kg} kg)<br>
-    Meta sugerida: <b>${g.goal_kcal}</b> kcal · proteína <b>${g.goal_protein_g}</b> g · carbos <b>${g.goal_carbs_g}</b> g · grasa <b>${g.goal_fat_g}</b> g · agua <b>${fmtLiters(g.goal_water_ml)}</b> L`;
+  const now = goalsFor(todayStr());
+  const delta = Math.round(g.goal_kcal - s.tdee);
+  const pace = s.realPace;
+  const paceTxt = pace === 0 ? 'para mantener tu peso'
+    : `para ${pace < 0 ? 'bajar' : 'subir'} ≈ ${String(Math.abs(pace)).replace('.', ',')} kg por semana`;
+  box.innerHTML = `
+    <div class="gr-kcal"><b class="mono">${g.goal_kcal}</b> kcal al día</div>
+    <div class="gr-why">${paceTxt} · gastas ≈ ${s.tdee} kcal${delta ? ` (${delta > 0 ? '+' : '−'}${Math.abs(delta)})` : ''}</div>
+    ${s.clamped ? `<div class="gr-warn">Ese ritmo bajaría de tu mínimo seguro; se dejó en ${g.goal_kcal} kcal.</div>` : ''}
+    <div class="gr-macros">
+      <span><b class="mono">${g.goal_protein_g}</b> g proteína</span>
+      <span><b class="mono">${g.goal_carbs_g}</b> g carbos</span>
+      <span><b class="mono">${g.goal_fat_g}</b> g grasa</span>
+      <span><b class="mono">${fmtLiters(g.goal_water_ml)}</b> L agua</span>
+    </div>
+    ${Math.round(now.goal_kcal) !== g.goal_kcal ? `<div class="gr-now">Ahora tienes ${Math.round(now.goal_kcal)} kcal.</div>` : '<div class="gr-now">Ya son tus metas actuales.</div>'}`;
 }
-['bodySex','bodyAge','bodyHeight','bodyObjective','bodyTraining'].forEach(id => {
-  document.getElementById(id).addEventListener('input', renderSuggestion);
-});
 
-document.getElementById('saveBodyBtn').addEventListener('click', async () => {
-  const fields = readBodyInputs();
-  if(fields.height_cm && (fields.height_cm < 100 || fields.height_cm > 250)){ showToast('La altura va en cm (100–250)'); return; }
-  try{
-    bodyProfile = await saveBodyProfile(user.id, fields);
-    showToast('Perfil físico guardado');
-  }catch(err){ showToast('Error: ' + err.message); }
-});
-
-document.getElementById('applySuggestionBtn').addEventListener('click', async () => {
+document.getElementById('saveObjectiveBtn').addEventListener('click', async (ev) => {
   if(!lastSuggestion) return;
+  const fields = readBodyInputs();
+  if(fields.height_cm < 100 || fields.height_cm > 250){ showToast('La altura va en cm (100–250)'); return; }
+  const btn = ev.currentTarget;
+  btn.disabled = true; btn.textContent = 'Guardando...';
   try{
-    bodyProfile = await saveBodyProfile(user.id, readBodyInputs());
+    // el peso del paso 1 cuenta como el de hoy si cambió
+    const kg = readWeightInput();
+    if(kg && kg !== latestWeight()){
+      const row = await saveWeight(user.id, todayStr(), kg);
+      weights = [row, ...weights.filter(w => w.log_date !== row.log_date)];
+      renderWeights();
+    }
+    try{ bodyProfile = await saveBodyProfile(user.id, fields); }
+    catch(err){ if(err.saved){ bodyProfile = err.saved; showError(err.message); } else throw err; }
     await saveGoals(lastSuggestion.goals);
     fillGoalInputs(lastSuggestion.goals);
-    showToast('Metas actualizadas desde hoy');
+    renderSuggestion();
+    showToast('Objetivo guardado: metas nuevas desde hoy');
   }catch(err){ showToast('Error: ' + err.message); }
+  finally{ btn.disabled = !lastSuggestion; btn.textContent = 'Guardar objetivo'; }
 });
 
 /* ================= peso corporal ================= */
@@ -1884,6 +2014,7 @@ document.getElementById('saveWeightBtn').addEventListener('click', async () => {
     const row = await saveWeight(user.id, todayStr(), kg);
     weights = [row, ...weights.filter(w => w.log_date !== row.log_date)];
     document.getElementById('weightInput').value = '';
+    document.getElementById('bodyWeight').value = String(kg).replace('.', ',');
     renderWeights();
     renderSuggestion();
     showToast('Peso guardado');
