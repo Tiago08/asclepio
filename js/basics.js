@@ -1,0 +1,151 @@
+// Básicos: alimentos comunes con nombre simple, como los "Best Match" de MyFitnessPal.
+// Salen primero al buscar, al instante y sin red. Valores por 100 g sacados de USDA
+// (SR Legacy / Foundation) con su fdcId, y porciones caseras con su peso en gramos.
+// Generado con un script a partir de la API de USDA; para cambiar un valor, búscalo
+// por su fdcId en https://fdc.nal.usda.gov/ y edítalo aquí.
+import { normalizeText } from './foodDict.js?v=8';
+
+// orden de los valores en cada fila (todos por 100 g)
+const FIELDS = ['kcal', 'carbs_g', 'sugars_g', 'protein_g', 'fat_g', 'sat_fat_g', 'fiber_g', 'sodium_mg',
+  'potassium_mg', 'calcium_mg', 'iron_mg', 'vit_a_mcg', 'vit_c_mg', 'vit_d_mcg', 'vit_b12_mcg'];
+
+// [nombre, categoría, fdcId de USDA, valores, porciones caseras [nombre, gramos]]
+const RAW = [
+  ["Arroz blanco cocido", "Granos", "168878", [130,28.17,0.05,2.69,0.28,0.08,0.4,1,35,10,1.2,0,0,0,0], [["taza",158]]],
+  ["Arroz blanco crudo", "Granos", "168877", [365,79.95,0.12,7.13,0.66,0.18,1.3,5,115,28,4.31,0,0,0,0], [["taza",185]]],
+  ["Arroz integral cocido", "Granos", "169704", [123,25.58,0.24,2.74,0.97,0.26,1.6,4,86,3,0.56,0,0,0,0], [["taza",202]]],
+  ["Avena en hojuelas", "Granos", "173904", [379,67.7,0.99,13.15,6.52,1.11,10.1,6,362,52,4.25,0,0,0,0], [["taza",81]]],
+  ["Avena cocida con agua", "Granos", "173905", [71,12,0.27,2.54,1.52,0.31,1.7,4,70,9,0.9,0,0,0,0], [["cucharada",14.6],["taza",234]]],
+  ["Pasta cocida", "Granos", "169737", [158,30.86,0.56,5.8,0.93,0.18,1.8,1,44,7,1.28,0,0,0,0], [["taza",116]]],
+  ["Pan blanco", "Panes", "174924", [266,49.42,5.67,8.85,3.33,0.7,2.7,490,126,144,3.61,0,0,0,0], [["rebanada",29],["taza",35]]],
+  ["Pan integral", "Panes", "172688", [252,42.71,4.34,12.45,3.5,0.72,6,455,254,161,2.47,0,0,0,0], [["rebanada",32]]],
+  ["Arepa", "Panes", "168070", [219,37.14,0.87,5.48,5.38,2.9,2.6,270,88,89,1.04,61,null,null,0], [["unidad",98]]],
+  ["Harina de maíz precocida", "Granos", "168922", [370,79.45,1.61,7.11,1.75,0.22,3.9,7,142,3,4.36,0,0,0,0], [["taza",157]]],
+  ["Tortilla de maíz", "Panes", "175036", [218,44.64,0.88,5.7,2.85,0.45,6.3,45,186,81,1.23,0,0,0,0], [["unidad",24]]],
+  ["Tortilla de trigo", "Panes", "175037", [306,49.38,3.71,8.2,7.99,2.92,3.5,736,125,146,3.63,0,0,0,0], [["unidad",117]]],
+  ["Quinoa cocida", "Granos", "168917", [120,21.3,0.87,4.4,1.92,0.23,2.8,7,172,17,1.49,0,0,0,0], [["taza",185]]],
+  ["Maíz dulce (jojoto) cocido", "Verduras", "169999", [96,20.98,4.54,3.41,1.5,0.2,2.4,1,218,3,0.45,13,5.5,0,0], [["taza",149]]],
+  ["Papa sancochada", "Tubérculos", "170440", [86,20.01,0.89,1.71,0.1,0.03,1.8,5,328,8,0.31,0,7.4,0,0], [["unidad mediana",167],["unidad grande",300],["unidad pequeña",125]]],
+  ["Papa al horno con piel", "Tubérculos", "170093", [93,21.15,1.18,2.5,0.13,0.03,2.2,10,535,15,1.08,1,9.6,0,0], []],
+  ["Papas fritas", "Tubérculos", "169264", [158,25.55,0.37,2.75,5.48,0.85,2,324,478,12,0.57,0,8.6,0,0], []],
+  ["Batata horneada", "Tubérculos", "168483", [90,20.71,6.48,2.01,0.15,0.05,3.3,36,475,38,0.69,961,19.6,0,0], [["unidad mediana",114],["unidad grande",180],["unidad pequeña",60]]],
+  ["Yuca cruda", "Tubérculos", "169985", [160,38.06,1.7,1.36,0.28,0.07,1.8,14,271,16,0.27,1,20.6,0,0], [["taza",206]]],
+  ["Plátano maduro crudo", "Tubérculos", "169130", [122,31.89,17.51,1.3,0.35,0,1.7,4,487,3,0.55,56,18.4,0,0], [["taza",148]]],
+  ["Plátano verde sancochado", "Tubérculos", "168216", [121,29.15,2.25,1.09,0.08,0.07,2.6,2,289,3,0.3,null,9.1,null,null], [["taza",137]]],
+  ["Tostones (plátano verde frito)", "Tubérculos", "168199", [309,49.17,3.63,1.5,11.81,3.69,3.5,2,482,4,0.67,60,3.4,null,null], [["taza",118]]],
+  ["Pechuga de pollo asada", "Proteínas", "171477", [165,0,0,31.02,3.57,1.01,0,74,256,15,1.04,6,0,0.1,0.34], [["media pechuga",86],["taza",140]]],
+  ["Pechuga de pollo cruda", "Proteínas", "171077", [120,0,0,22.5,2.62,0.56,0,45,334,5,0.37,9,0,0,0.21], [["pieza",272]]],
+  ["Muslo de pollo asado", "Proteínas", "172388", [179,0,0,24.76,8.15,2.31,0,106,269,9,1.13,8,0,0.2,0.42], [["muslo",137]]],
+  ["Carne molida 85/15 cocida", "Proteínas", "174032", [250,0,0,25.93,15.41,5.89,0,72,318,18,2.6,3,0,0,2.64], [["hamburguesa",77]]],
+  ["Carne molida 85/15 sofrita", "Proteínas", "174034", [256,0,0,27.73,15.3,5.81,0,89,407,22,2.93,3,0,0,2.8], []],
+  ["Chuleta de cerdo asada", "Proteínas", "168240", [180,0,0,26.76,7.29,2.16,0,56,356,23,0.8,0,0,0.7,0.54], [["chuleta",146]]],
+  ["Jamón en lonjas", "Proteínas", "173864", [164,3.63,1,16.6,8.8,0.5,1.3,814,287,24,1.02,0,4,0.7,0.42], [["rebanada",28]]],
+  ["Tocineta frita", "Proteínas", "168322", [468,1.7,0,33.92,35.09,11.96,0,1684,499,11,0.95,11,0,0.4,1.09], [["rebanada",11.5]]],
+  ["Salchicha de res", "Proteínas", "173862", [315,2.97,1.17,11.69,28.1,11.46,0,865,364,14,1.12,3,0,0.9,0.96], []],
+  ["Atún en agua", "Proteínas", "334194", [90,0.08,null,19,0.94,0.22,null,219,176,18,1.67,null,null,1.2,2.57], []],
+  ["Atún en aceite", "Proteínas", "173708", [198,0,0,29.13,8.21,1.53,0,416,207,13,1.39,23,0,6.7,2.2], [["lata",321],["taza",146]]],
+  ["Salmón cocido", "Proteínas", "175168", [206,0,0,22.1,12.35,2.4,0,61,384,15,0.34,69,3.7,13.1,2.8], []],
+  ["Sardinas en aceite", "Proteínas", "175139", [208,0,0,24.62,11.45,1.53,0,307,397,382,2.92,32,0,4.8,8.94], [["lata",92],["unidad pequeña",12],["taza",149]]],
+  ["Camarones cocidos", "Proteínas", "175180", [99,0.2,null,23.98,0.28,0.06,null,111,259,70,0.51,null,null,null,null], []],
+  ["Huevo entero", "Huevos", "171287", [143,0.72,0.37,12.56,9.51,3.13,0,142,138,56,1.75,160,0,2,0.89], [["unidad mediana",44],["unidad grande",50],["unidad pequeña",38]]],
+  ["Huevo sancochado", "Huevos", "173424", [155,1.12,1.12,12.58,10.61,3.27,0,124,126,50,1.19,149,0,2.2,1.11], [["unidad grande",50],["cucharada",8.5],["taza",136]]],
+  ["Huevo frito", "Huevos", "173423", [196,0.83,0.4,13.61,14.84,4.32,0,207,152,62,1.89,219,0,2.2,0.97], [["unidad grande",46]]],
+  ["Huevos revueltos", "Huevos", "172187", [149,1.61,1.39,9.99,10.98,3.33,0,145,132,66,1.31,161,0,1.8,0.76], [["unidad grande",61],["cucharada",13.7],["taza",220]]],
+  ["Clara de huevo", "Huevos", "172183", [52,0.73,0.71,10.9,0.17,0,0,166,163,7,0.08,0,0,0,0.09], [["unidad grande",33],["taza",243]]],
+  ["Caraotas negras cocidas", "Legumbres", "173735", [132,23.71,0.32,8.86,0.54,0.14,8.7,1,355,27,2.1,0,0,0,0], [["taza",172]]],
+  ["Frijoles rojos cocidos", "Legumbres", "175194", [127,22.8,0.32,8.67,0.5,0.07,7.4,2,403,28,2.94,0,1.2,0,0], [["cucharada",11],["taza",177]]],
+  ["Lentejas cocidas", "Legumbres", "172421", [116,20.13,1.8,9.02,0.38,0.05,7.9,2,369,19,3.33,0,1.5,0,0], [["cucharada",12.3],["taza",198]]],
+  ["Garbanzos cocidos", "Legumbres", "173757", [164,27.42,4.8,8.86,2.59,0.27,7.6,7,291,49,2.89,1,1.3,0,0], [["taza",164]]],
+  ["Tofu firme", "Legumbres", "172475", [144,2.78,null,17.27,8.72,1.26,2.3,14,237,683,2.66,null,0.2,0,0], []],
+  ["Leche entera", "Lácteos", "171265", [61,4.8,5.05,3.15,3.25,1.86,0,43,132,113,0.03,46,0,1.3,0.45], [["cucharada",15],["taza",244]]],
+  ["Leche descremada", "Lácteos", "171269", [34,4.96,5.09,3.37,0.08,0.06,0,42,156,122,0.03,61,0,1.2,0.5], [["taza",245]]],
+  ["Leche en polvo entera", "Lácteos", "170876", [496,38.42,38.42,26.32,26.71,16.74,0,371,1330,912,0.47,258,8.6,10.5,3.25], [["taza",128]]],
+  ["Queso blanco fresco", "Lácteos", "172223", [299,2.98,2.32,18.09,23.82,12.94,0,751,129,566,0.2,224,0,2.7,1.68], [["taza",122]]],
+  ["Queso mozzarella", "Lácteos", "170845", [299,2.4,0,22.17,22.14,13.9,0,486,76,505,0.44,179,0,0.4,2.28], [["taza",112]]],
+  ["Queso amarillo (cheddar)", "Lácteos", "328637", [408,2.44,null,23.3,34,19.2,null,654,77,707,0.16,316,null,null,1.06], []],
+  ["Yogur natural", "Lácteos", "171284", [61,4.66,4.66,3.47,3.25,2.1,0,46,155,121,0.05,27,0.5,0.1,0.37], [["taza",245]]],
+  ["Yogur griego natural descremado", "Lácteos", "330137", [61,3.64,null,10.3,0.37,0.11,null,36,141,111,0.07,1,null,0,0.7], []],
+  ["Mantequilla", "Lácteos", "173410", [717,0.06,0.06,0.85,81.11,51.37,0,643,24,24,0.02,684,0,0,0.17], [["cucharada",14.2],["taza",227]]],
+  ["Natilla (crema agria)", "Lácteos", "171257", [198,4.63,3.41,2.44,19.35,10.14,0,31,125,101,0.07,124,0.9,0,0.21], [["cucharada",12],["taza",230]]],
+  ["Cambur", "Frutas", "173944", [89,22.84,12.23,1.09,0.33,0.11,2.6,1,358,5,0.26,3,8.7,0,0], [["unidad mediana",118],["unidad grande",136],["unidad pequeña",101]]],
+  ["Manzana con piel", "Frutas", "1750341", [60.95,14.77,11.83,0.13,0.15,null,2.11,0.28,105.9,6.64,0.06,null,null,null,null], []],
+  ["Naranja", "Frutas", "169097", [47,11.75,9.35,0.94,0.12,0.01,2.4,0,181,40,0.1,11,53.2,0,0], [["unidad",131],["unidad grande",184],["unidad pequeña",96]]],
+  ["Mandarina", "Frutas", "169105", [53,13.34,10.58,0.81,0.31,0.04,1.8,2,166,37,0.15,34,26.7,0,0], [["unidad mediana",88],["unidad grande",120],["unidad pequeña",76]]],
+  ["Fresas", "Frutas", "167762", [32,7.68,4.89,0.67,0.3,0.01,2,1,153,16,0.41,1,58.8,0,0], [["unidad mediana",12],["unidad grande",18],["unidad pequeña",7]]],
+  ["Uvas", "Frutas", "174683", [69,18.1,15.48,0.72,0.16,0.05,0.9,2,191,10,0.36,3,3.2,0,0], [["taza",151]]],
+  ["Piña", "Frutas", "169124", [50,13.12,9.85,0.54,0.12,0.01,1.4,1,109,13,0.29,3,47.8,0,0], [["unidad",905],["rebanada",56],["taza",165]]],
+  ["Mango", "Frutas", "169910", [60,14.98,13.66,0.82,0.38,0.09,1.6,1,168,11,0.16,54,36.4,0,0], [["unidad",336],["taza",165]]],
+  ["Lechosa", "Frutas", "169926", [43,10.82,7.82,0.47,0.26,0.08,1.7,8,182,20,0.25,47,60.9,0,0], [["unidad",157],["taza",230]]],
+  ["Patilla", "Frutas", "167765", [30,7.55,6.2,0.61,0.15,0.02,0.4,1,112,7,0.24,28,8.1,0,0], [["taza",152]]],
+  ["Melón", "Frutas", "169092", [34,8.16,7.86,0.84,0.19,0.05,0.9,16,267,9,0.21,169,36.7,0,0], [["taza",160]]],
+  ["Pera", "Frutas", "169118", [57,15.23,9.75,0.36,0.14,0.02,3.1,1,116,9,0.18,1,4.3,0,0], [["unidad mediana",178],["unidad grande",230],["unidad pequeña",148]]],
+  ["Durazno", "Frutas", "169928", [39,9.54,8.39,0.91,0.25,0.02,1.5,0,190,6,0.25,16,6.6,0,0], [["unidad mediana",150],["unidad grande",175],["unidad pequeña",130]]],
+  ["Guayaba", "Frutas", "173044", [68,14.32,8.92,2.55,0.95,0.27,5.4,2,417,18,0.26,31,228.3,0,0], [["unidad",55],["taza",165]]],
+  ["Parchita", "Frutas", "169108", [97,23.38,11.2,2.2,0.7,0.06,10.4,28,348,12,1.6,64,30,0,0], [["unidad",18],["taza",236]]],
+  ["Aguacate", "Frutas", "171705", [160,8.53,0.66,2,14.66,2.13,6.7,7,485,12,0.55,7,10,0,0], [["taza",230]]],
+  ["Limón", "Frutas", "167746", [29,9.32,2.5,1.1,0.3,0.04,2.8,2,138,26,0.6,1,53,0,0], [["unidad",84],["taza",212]]],
+  ["Kiwi", "Frutas", "168153", [61,14.66,8.99,1.14,0.52,0.03,3,3,312,34,0.31,4,92.7,0,0], [["unidad",69],["taza",180]]],
+  ["Arándanos", "Frutas", "171711", [57,14.49,9.96,0.74,0.33,0.03,2.4,1,77,6,0.28,3,9.7,0,0], [["taza",148]]],
+  ["Pasas", "Frutas", "168164", [301,80.02,65.7,3.28,0.2,0.07,3.3,24,746,64,0.98,0,3.2,0,0], [["taza",145]]],
+  ["Tomate", "Verduras", "170457", [18,3.89,2.63,0.88,0.2,0.03,1.2,5,237,10,0.27,42,13.7,0,0], [["unidad mediana",123],["rebanada",20],["unidad grande",182]]],
+  ["Cebolla", "Verduras", "170000", [40,9.34,4.24,1.1,0.1,0.04,1.7,4,146,23,0.21,0,7.4,0,0], [["unidad mediana",110],["rebanada",14],["unidad grande",150]]],
+  ["Lechuga romana", "Verduras", "169247", [17,3.29,1.19,1.23,0.3,0.04,2.1,8,247,33,0.97,436,4,0,0], [["taza",47]]],
+  ["Zanahoria", "Verduras", "170393", [41,9.58,4.74,0.93,0.24,0.03,2.8,69,320,33,0.3,835,5.9,0,0], [["unidad mediana",61],["rebanada",3],["unidad grande",72]]],
+  ["Brócoli cocido", "Verduras", "169967", [35,7.18,1.39,2.38,0.41,0.08,3.3,41,293,40,0.67,77,64.9,0,0], []],
+  ["Espinaca", "Verduras", "168462", [23,3.63,0.42,2.86,0.39,0.06,2.2,79,558,99,2.71,469,28.1,0,0], [["taza",30]]],
+  ["Pepino", "Verduras", "168409", [15,3.63,1.67,0.65,0.11,0.04,0.5,2,147,16,0.28,5,2.8,0,0], []],
+  ["Pimentón rojo", "Verduras", "170108", [26,6.03,4.2,0.99,0.3,0.06,2.1,4,211,7,0.43,157,127.7,0,0], [["unidad mediana",119],["unidad grande",164],["unidad pequeña",74]]],
+  ["Repollo", "Verduras", "169975", [25,5.8,3.2,1.28,0.1,0.03,2.5,18,170,40,0.47,5,36.6,0,0], [["taza",89]]],
+  ["Calabacín", "Verduras", "169291", [17,3.11,2.5,1.21,0.32,0.08,1,8,261,16,0.37,10,17.9,0,0], [["unidad mediana",196],["rebanada",9.9],["unidad grande",323]]],
+  ["Auyama", "Verduras", "168448", [26,6.5,2.76,1,0.1,0.05,0.5,1,340,21,0.8,426,9,0,0], [["taza",116]]],
+  ["Berenjena", "Verduras", "169228", [25,5.88,3.53,0.98,0.18,0.03,3,2,229,9,0.23,1,2.2,0,0], [["taza",82]]],
+  ["Champiñones", "Verduras", "169251", [22,3.26,1.98,3.09,0.34,0.05,1,5,318,3,0.5,0,2.1,0.2,0.04], [["unidad mediana",18],["rebanada",6],["unidad grande",23]]],
+  ["Ajo", "Verduras", "169230", [149,33.06,1,6.36,0.5,0.09,2.1,17,401,181,1.7,0,31.2,0,0], [["diente",3],["cucharadita",2.8],["taza",136]]],
+  ["Remolacha", "Verduras", "169145", [43,9.56,6.76,1.61,0.17,0.03,2.8,78,325,16,0.8,2,4.9,0,0], [["taza",136]]],
+  ["Coliflor", "Verduras", "169986", [25,4.97,1.91,1.92,0.28,0.13,2,30,299,22,0.42,0,48.2,0,0], [["taza",107]]],
+  ["Vainitas", "Verduras", "169961", [31,6.97,3.26,1.83,0.22,0.05,2.7,6,211,37,1.03,35,12.2,0,0], [["taza",100]]],
+  ["Aceite de oliva", "Grasas", "171413", [884,0,0,0,100,13.81,0,2,1,1,0.56,0,0,0,0], [["cucharada",13.5],["cucharadita",4.5],["taza",216]]],
+  ["Aceite vegetal (canola)", "Grasas", "172336", [884,0,0,0,100,7.37,0,0,0,0,0,0,0,0,0], [["cucharada",14],["cucharadita",4.5],["taza",218]]],
+  ["Mantequilla de maní", "Grasas", "172470", [598,22.31,10.49,22.21,51.36,10.32,5,17,558,49,1.74,0,0,0,0], [["taza",258]]],
+  ["Maní tostado", "Frutos secos", "173806", [587,21.26,4.9,24.35,49.66,7.72,8.4,6,634,58,1.58,0,0,0,0], [["taza",146]]],
+  ["Almendras", "Frutos secos", "170567", [579,21.55,4.35,21.15,49.93,3.8,12.5,1,733,269,3.71,0,0,0,0], [["taza",143]]],
+  ["Nueces", "Frutos secos", "170187", [654,13.71,2.61,15.23,65.21,6.13,6.7,2,441,98,2.91,1,1.3,0,0], [["taza",80]]],
+  ["Merey", "Frutos secos", "170162", [553,30.19,5.91,18.22,43.85,7.78,3.3,12,660,37,6.68,0,0.5,0,0], []],
+  ["Azúcar", "Dulces", "169655", [387,99.98,99.8,0,0,0,0,1,2,1,0.05,0,0,0,0], [["cucharadita",4.2],["taza",200]]],
+  ["Papelón / azúcar morena", "Dulces", "168833", [380,98.09,97.02,0.12,0,0,0,28,133,83,0.71,0,0,0,0], [["cucharadita",4.6],["taza",220]]],
+  ["Miel", "Dulces", "169640", [304,82.4,82.12,0.3,0,0,0.2,4,52,6,0.42,0,0.5,0,0], [["cucharada",21],["taza",339]]],
+  ["Chocolate oscuro 70-85%", "Dulces", "170273", [598,45.9,23.99,7.79,42.63,24.49,10.9,20,715,73,11.9,2,null,null,0.28], []],
+  ["Mayonesa", "Salsas", "171009", [680,0.57,0.57,0.96,74.85,11.7,0,635,20,8,0.21,16,0,0.2,0.12], [["cucharada",13.8],["taza",220]]],
+  ["Salsa de tomate (ketchup)", "Salsas", "168556", [101,27.4,21.27,1.04,0.1,0.01,0.3,907,281,15,0.35,26,4.1,0,0], [["cucharada",17],["taza",240]]],
+  ["Café negro", "Bebidas", "171890", [1,0,0,0.12,0.02,0,0,2,49,2,0.01,0,0,0,0], [["taza",237]]],
+  ["Jugo de naranja", "Bebidas", "169100", [49,11.54,8.31,0.68,0.12,0.01,0.3,2,178,11,0.13,2,33.6,0,0], [["taza",249]]],
+  ["Refresco de cola", "Bebidas", "174852", [42,10.36,9.94,0,0.25,0,0,3,5,1,0.02,0,0,0,0], [["lata",370]]],
+  ["Cerveza", "Bebidas", "168746", [43,3.55,0,0.46,0,0,0,4,27,4,0.02,0,0,0,0.02], [["lata",356]]],
+];
+
+export const BASICS = RAW.map(([name, category, fdcId, values, units], i) => {
+  const row = {
+    source: 'usda',
+    usda_fdc_id: fdcId,
+    name,
+    brand: null,
+    category,
+    serving_label: '100 g',
+    serving_grams: 100,
+    // internos (empiezan por "_", no se guardan en la base de datos)
+    _kind: 'basic',
+    _units: units.map(([label, grams]) => ({ label, grams })),
+    _norm: normalizeText(name),
+    _rank: i // orden de la lista: el más común primero
+  };
+  FIELDS.forEach((k, i) => { row[k] = values[i]; });
+  return row;
+});
+
+/** Básicos cuyo nombre contiene todas las palabras buscadas (por inicio de palabra). */
+export function searchBasics(query) {
+  const words = normalizeText(query).split(' ').filter(Boolean)
+    .map(w => (w.length > 3 ? w.replace(/(es|s)$/, '') : w));
+  if (!words.length) return [];
+  return BASICS.filter(b => words.every(w => (' ' + b._norm).includes(' ' + w)));
+}

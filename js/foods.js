@@ -1,6 +1,6 @@
-import { supabase } from './supabaseClient.js?v=7';
-import { USDA_API_KEY } from './config.js?v=7';
-import { dictQueryToEnglish, normalizeText } from './foodDict.js?v=7';
+import { supabase } from './supabaseClient.js?v=8';
+import { USDA_API_KEY } from './config.js?v=8';
+import { dictQueryToEnglish, normalizeText } from './foodDict.js?v=8';
 
 // Campos nutricionales que manejamos en toda la app, en el orden
 // en que se muestran. Un solo lugar para no desincronizar listas.
@@ -284,11 +284,15 @@ export function rankFoods(items, query, enQuery, usedIds = new Set()) {
     let score = level * 100;
     // tus alimentos (guardados en la tabla) suben; y más si ya los registraste
     if (f.id && level <= 1) score -= usedIds.has(f.id) ? 90 : 40;
+    // básicos (como los "Best Match" de MyFitnessPal): suben sobre lo genérico
+    if (f._kind === 'basic' && level <= 1) score -= 30;
     if (isBranded) score += 30;
     if (NOISY_PREFIX.test(base)) score += 25;
     if (ODD_FORM.test(base)) score += 10;
     if (f.kcal == null) score += 15; // sin kcal casi no sirve para registrar
-    score += Math.min(base.length, 80) / 10;
+    // desempate: los básicos van en el orden de su lista (el más común primero);
+    // el resto, nombres más cortos (más "puros") primero
+    score += f._kind === 'basic' && f._rank != null ? f._rank / 100 : Math.min(base.length, 80) / 10;
     return { f, score };
   });
   return scored.sort((a, b) => a.score - b.score).map(x => x.f);
@@ -372,7 +376,7 @@ export async function cacheUsdaFood(usdaRow, userId, userEmail) {
   const fields = {};
   for (const [k, v] of Object.entries(usdaRow)) if (!k.startsWith('_')) fields[k] = v;
   // La categoría no se traduce en la búsqueda (no se muestra); se traduce al guardar.
-  if (fields.category) fields.category = await translateToSpanish(fields.category, userEmail);
+  if (fields.category && usdaRow._kind !== 'basic') fields.category = await translateToSpanish(fields.category, userEmail);
   // Si el nombre aún no se había traducido en pantalla, se intenta una vez más.
   if (usdaRow._needsTr && usdaRow._en) fields.name = await translateToSpanish(usdaRow._en, userEmail);
 
@@ -406,11 +410,19 @@ export async function updateFood(id, fields) {
   return data;
 }
 
-export async function logFood({ userId, foodRow, quantity, momento, date, time }) {
+/** Texto de un registro de comida: "Arroz blanco cocido · 1 taza" o, en los viejos, "Arepa x2". */
+export function foodLogLabel(d) {
+  const name = d.food_name_snapshot || '';
+  const q = Number(d.quantity);
+  if (name.includes(' · ') || !q || q === 1) return name;
+  return `${name} x${Math.round(q * 100) / 100}`;
+}
+
+export async function logFood({ userId, foodRow, quantity, momento, date, time, label }) {
   const payload = {
     user_id: userId,
     food_id: foodRow.id,
-    food_name_snapshot: foodRow.name,
+    food_name_snapshot: label || foodRow.name,
     momento,
     quantity,
     log_date: date,

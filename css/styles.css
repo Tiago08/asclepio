@@ -211,13 +211,17 @@ header{
 .field{ margin-bottom: 15px; }
 .field label{ display: block; font-size: 11.5px; color: var(--text-dim); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.04em; }
 .field input[type=text], .field input[type=number], .field input[type=time],
-.field input[type=date], .field select, .field textarea{
+.field input[type=date], .field input[type=search], .field select, .field textarea{
   width: 100%; background: var(--surface-sunken); border: none; border-radius: var(--r-sm);
   color: var(--text); padding: 11px 12px; font-size: 16px; font-family: inherit;
+  -webkit-appearance: none; appearance: none;
 }
+.field input[type=search]::-webkit-search-decoration{ -webkit-appearance: none; }
 .field input:focus, .field select:focus, .field textarea:focus{ outline: 2px solid var(--accent); }
 .field textarea{ min-height: 64px; resize: vertical; }
 .row-2{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.row-3{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.form-hint{ font-size: 12.5px; color: var(--text-dim); margin: -6px 0 14px; }
 
 .toggle-pair{ display: flex; gap: 8px; flex-wrap: wrap; }
 .scale-row{ display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
@@ -243,7 +247,22 @@ header{
 .food-result .fr-name{ font-weight: 500; }
 .food-result .fr-meta{ font-size: 11.5px; color: var(--text-faint); margin-top: 3px; }
 .search-empty{ font-size: 12.5px; color: var(--text-faint); padding: 12px 4px; }
-.add-new-food-btn{ margin-top: 10px; font-size: 12.5px; color: var(--accent); background:none; border:none; padding: 4px 0; }
+.search-section-title{ font-size: 11.5px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; margin: 14px 0 6px; }
+.search-section-title:first-child{ margin-top: 0; }
+.food-result .fr-check{ color: var(--accent); font-size: 12px; font-weight: 600; margin-left: 2px; }
+.selected-food-card .fr-check{ color: var(--accent); font-size: 12px; }
+.more-usda-btn{
+  display: block; width: 100%; margin-top: 8px; padding: 11px 14px; text-align: left;
+  background: none; border: none; border-radius: var(--r-md);
+  color: var(--accent); font-size: 13px;
+}
+.more-usda-btn:active{ background: var(--surface-sunken); }
+.food-extra-actions{ display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-top: 6px; }
+.add-new-food-btn{ margin-top: 6px; font-size: 12.5px; color: var(--accent); background:none; border:none; padding: 6px 0; text-align: left; }
+
+.qty-row{ display: flex; flex-direction: column; gap: 10px; }
+.unit-chips .chip{ padding: 8px 13px; }
+.unit-chips .chip-g{ opacity: 0.6; font-size: 11.5px; margin-left: 2px; }
 
 .selected-food-card{
   background: var(--surface-sunken); border-radius: var(--r-md); padding: 13px 14px; margin-bottom: 12px;

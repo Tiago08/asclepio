@@ -1,14 +1,15 @@
-import { supabase } from './supabaseClient.js?v=7';
+import { supabase } from './supabaseClient.js?v=8';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js?v=7';
+} from './auth.js?v=8';
 import {
   NUTRIENT_FIELDS, searchUsda, searchLocalFoods, searchFavorites,
-  cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, rankFoods, pickForDisplay, translateToSpanish
-} from './foods.js?v=7';
-import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=7';
-import { buildReportText, downloadText } from './report.js?v=7';
+  cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel
+} from './foods.js?v=8';
+import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=8';
+import { buildReportText, downloadText } from './report.js?v=8';
+import { BASICS, searchBasics } from './basics.js?v=8';
 
 /* ================= utilidades de hora ================= */
 
@@ -350,12 +351,15 @@ function renderQuickGrid(){
 
 /* ================= favoritos (1-toque) ================= */
 
-// ids de alimentos que el usuario ya registró: suben en la búsqueda
+// alimentos que el usuario ya registró (por frecuencia): suben en la búsqueda
+// y se muestran al abrir el buscador
+let usedFoods = [];
 let usedFoodIds = new Set();
 
 async function renderFavorites(){
   try{
     const used = await searchFavorites(user.id, 30);
+    usedFoods = used;
     usedFoodIds = new Set(used.map(f => f.id));
     const favs = used.slice(0, 6);
     if(favs.length === 0){ favoritesRow.innerHTML = ''; return; }
@@ -537,7 +541,37 @@ function openActivityForm(typeKey){
   }
 }
 
-/* ================= formulario: comida (búsqueda USDA + local) ================= */
+/* ================= formulario: comida ================= */
+/* Como MyFitnessPal: al abrir, tus frecuentes; al escribir, tus alimentos y los
+   básicos (al instante, sin red); USDA solo si hace falta o si lo pides. */
+
+const MAX_MAIN_RESULTS = 8;   // lista principal corta: tus alimentos + básicos
+const MAX_USDA_RESULTS = 15;
+// Cada búsqueda lleva un número; si llega la respuesta de una búsqueda vieja
+// (el usuario ya escribió otra cosa), se descarta para no pisar la nueva.
+let foodSearchSeq = 0;
+
+// básicos por fdcId, para dar porciones caseras a copias ya guardadas en la tabla
+const BASICS_BY_FDC = new Map(BASICS.map(b => [b.usda_fdc_id, b]));
+function withUnits(f){
+  if(f._units || f.source !== 'usda') return f;
+  const b = BASICS_BY_FDC.get(f.usda_fdc_id);
+  // una copia guardada de un básico sigue siendo básico (✓, porciones y orden)
+  return b ? Object.assign(f, { _units: b._units, _kind: 'basic', _rank: b._rank }) : f;
+}
+
+function foodMeta(f){
+  const kcal = f.kcal != null ? Math.round(f.kcal) + ' kcal' : 'sin kcal';
+  return `${f.brand ? escapeHtml(f.brand) + ' · ' : ''}${kcal} · ${escapeHtml(f.serving_label)}`;
+}
+
+function foodListHtml(items, offset = 0){
+  return items.map((f, i) => `
+    <div class="food-result" data-idx="${i + offset}">
+      <div class="fr-name">${escapeHtml(f.name)}${f._kind === 'basic' ? ' <span class="fr-check" title="Básico verificado con USDA">✓</span>' : ''}</div>
+      <div class="fr-meta">${foodMeta(f)}</div>
+    </div>`).join('');
+}
 
 function openFoodForm(){
   resetForm();
@@ -548,10 +582,13 @@ function openFoodForm(){
     <h3><span>🍽️</span> Comida</h3>
     <div class="field">
       <label>Buscar alimento</label>
-      <input type="text" id="foodSearchInput" placeholder="arepa, arroz, Savoy...">
+      <input type="search" id="foodSearchInput" placeholder="arroz, cambur, Savoy..." autocomplete="off" enterkeyhint="search">
     </div>
     <div id="foodSearchResults"></div>
-    <button class="add-new-food-btn" id="addNewFoodBtn" type="button">+ agregar un alimento nuevo</button>
+    <div class="food-extra-actions">
+      <button class="add-new-food-btn" id="quickAddBtn" type="button">⚡ Agregar rápido (kcal y macros a mano)</button>
+      <button class="add-new-food-btn" id="addNewFoodBtn" type="button">+ Crear un alimento nuevo</button>
+    </div>
     <div class="form-actions">
       <button class="btn-ghost" id="cancelFoodBtn">Cancelar</button>
     </div>
@@ -559,79 +596,136 @@ function openFoodForm(){
   formArea.appendChild(card);
   card.querySelector('#cancelFoodBtn').addEventListener('click', closeForm);
   card.querySelector('#addNewFoodBtn').addEventListener('click', openNewFoodForm);
+  card.querySelector('#quickAddBtn').addEventListener('click', openQuickAddForm);
 
   const input = card.querySelector('#foodSearchInput');
   const resultsWrap = card.querySelector('#foodSearchResults');
   let debounceTimer = null;
 
+  renderRecentFoods(resultsWrap);
   input.addEventListener('input', () => {
     clearTimeout(debounceTimer);
     const q = input.value.trim();
-    if(q.length < 2){ foodSearchSeq++; resultsWrap.innerHTML = ''; return; }
-    debounceTimer = setTimeout(() => runFoodSearch(q, resultsWrap), 300);
+    if(q.length < 2){ foodSearchSeq++; renderRecentFoods(resultsWrap); return; }
+    debounceTimer = setTimeout(() => runFoodSearch(q, resultsWrap), 250);
   });
 
   input.focus();
 }
 
-// Cada búsqueda lleva un número; si llega la respuesta de una búsqueda vieja
-// (el usuario ya escribió otra cosa), se descarta para no pisar la nueva.
-let foodSearchSeq = 0;
-const MAX_FOOD_RESULTS = 20;
-
-function renderFoodResults(list, resultsWrap, { loadingMore = false } = {}){
-  const items = pickForDisplay(list, MAX_FOOD_RESULTS);
-  resultsWrap.innerHTML = `<div class="food-search-results">${items.map((f, i) => `
-    <div class="food-result" data-idx="${i}">
-      <div class="fr-name">${escapeHtml(f.name)}</div>
-      <div class="fr-meta">${f.brand ? escapeHtml(f.brand) + ' · ' : ''}${f.kcal != null ? Math.round(f.kcal) + ' kcal' : 'sin kcal'} · ${escapeHtml(f.serving_label)}</div>
-    </div>`).join('')}</div>`
-    + (loadingMore ? `<div class="search-empty"><span class="spinner"></span> buscando más en USDA...</div>` : '');
+/** Sin escribir nada: lo que más registras, para tocar y listo. */
+function renderRecentFoods(resultsWrap){
+  const items = usedFoods.slice(0, MAX_MAIN_RESULTS).map(withUnits);
+  if(!items.length){
+    resultsWrap.innerHTML = `<div class="search-empty">Escribe para buscar. Lo que registres aparecerá aquí la próxima vez.</div>`;
+    return;
+  }
+  resultsWrap.innerHTML = `<div class="search-section-title">Frecuentes</div>
+    <div class="food-search-results">${foodListHtml(items)}</div>`;
   resultsWrap.querySelectorAll('[data-idx]').forEach(el => {
     el.addEventListener('click', () => openQuantityStep(items[Number(el.dataset.idx)]));
   });
-  return items;
 }
 
 async function runFoodSearch(query, resultsWrap){
   const seq = ++foodSearchSeq;
   const isCurrent = () => seq === foodSearchSeq && resultsWrap.isConnected;
-  resultsWrap.innerHTML = `<div class="search-empty"><span class="spinner"></span> buscando...</div>`;
 
-  const localP = searchLocalFoods(query).catch(() => []);
-  const usdaP = searchUsda(query, user.email).catch(() => ({ rows: [], enQuery: '' }));
+  const basics = searchBasics(query);
+  let local = [];
+  let usdaState = 'idle'; // idle | loading | done
+  let usdaItems = [];
 
-  // 1) Lo local (tus alimentos) llega rápido: se muestra ya, sin esperar a USDA.
-  const local = await localP;
-  if(!isCurrent()) return;
-  if(local.length) renderFoodResults(rankFoods(local, query, '', usedFoodIds), resultsWrap, { loadingMore: true });
+  const render = () => {
+    // tus alimentos que ya son copia de un básico se muestran una sola vez
+    const localFdc = new Set(local.filter(f => f.source === 'usda').map(f => f.usda_fdc_id));
+    const main = rankFoods([...local.map(withUnits), ...basics.filter(b => !localFdc.has(b.usda_fdc_id))],
+      query, '', usedFoodIds).slice(0, MAX_MAIN_RESULTS);
+    const all = [...main, ...usdaItems];
 
-  // 2) Llega USDA: se junta todo y se ordena por relevancia.
-  const { rows: usdaRows, enQuery } = await usdaP;
-  if(!isCurrent()) return;
-  // evita duplicar un alimento local que ya es copia guardada del mismo fdcId de USDA
-  const cachedFdcIds = new Set(local.filter(f => f.source === 'usda').map(f => f.usda_fdc_id));
-  const usda = usdaRows.filter(f => !cachedFdcIds.has(f.usda_fdc_id));
-
-  const all = rankFoods([...local, ...usda], query, enQuery, usedFoodIds);
-  if(all.length === 0){
-    resultsWrap.innerHTML = `<div class="search-empty">Sin resultados. Puedes agregarlo como alimento nuevo.</div>`;
-    return;
-  }
-  const shown = renderFoodResults(all, resultsWrap);
-
-  // 3) Los nombres que no estaban en caché se traducen y se cambian en su sitio.
-  const nameEls = resultsWrap.querySelectorAll('.fr-name');
-  shown.forEach((f, i) => {
-    if(!f._needsTr) return;
-    const before = f.name;
-    translateToSpanish(f._en, user.email).then(es => {
-      if(es === before) return; // no se pudo traducir (sin cuota o sin red)
-      f.name = es;
-      f._needsTr = false;
-      if(isCurrent() && nameEls[i]) nameEls[i].textContent = es;
+    let html = main.length
+      ? `<div class="food-search-results">${foodListHtml(main)}</div>`
+      : (usdaState === 'idle' ? `<div class="search-empty">Nada en tus alimentos ni en los básicos.</div>` : '');
+    if(usdaState === 'idle'){
+      html += `<button class="more-usda-btn" id="moreUsdaBtn" type="button">Buscar más en USDA ›</button>`;
+    }else if(usdaState === 'loading'){
+      html += `<div class="search-empty"><span class="spinner"></span> buscando en USDA...</div>`;
+    }else if(usdaItems.length){
+      html += `<div class="search-section-title">Más resultados (USDA)</div>
+        <div class="food-search-results">${foodListHtml(usdaItems, main.length)}</div>`;
+    }else{
+      html += `<div class="search-empty">USDA tampoco tiene resultados. Puedes crearlo como alimento nuevo.</div>`;
+    }
+    resultsWrap.innerHTML = html;
+    resultsWrap.querySelectorAll('[data-idx]').forEach(el => {
+      el.addEventListener('click', () => openQuantityStep(all[Number(el.dataset.idx)]));
     });
-  });
+    const moreBtn = resultsWrap.querySelector('#moreUsdaBtn');
+    if(moreBtn) moreBtn.addEventListener('click', loadUsda);
+  };
+
+  const loadUsda = async () => {
+    usdaState = 'loading';
+    render();
+    const { rows, enQuery } = await searchUsda(query, user.email).catch(() => ({ rows: [], enQuery: '' }));
+    if(!isCurrent()) return;
+    // fuera lo que ya está arriba (tus copias guardadas y los básicos)
+    const shownFdc = new Set([...local, ...basics].map(f => f.usda_fdc_id).filter(Boolean));
+    const ranked = rankFoods(rows.filter(r => !shownFdc.has(r.usda_fdc_id)), query, enQuery, usedFoodIds);
+    usdaItems = pickForDisplay(ranked, MAX_USDA_RESULTS);
+    usdaState = 'done';
+    render();
+    // los nombres que no estaban en caché se traducen y se cambian en su sitio
+    usdaItems.forEach(f => {
+      if(!f._needsTr) return;
+      const before = f.name;
+      translateToSpanish(f._en, user.email).then(es => {
+        if(es === before || !isCurrent()) return; // sin traducción (sin cuota o sin red)
+        f.name = es;
+        f._needsTr = false;
+        render();
+      });
+    });
+  };
+
+  // 1) básicos: al instante, sin red
+  render();
+  // 2) tus alimentos (Supabase)
+  local = await searchLocalFoods(query).catch(() => []);
+  if(!isCurrent()) return;
+  render();
+  // 3) USDA solo si casi no hay nada; si no, queda el botón
+  const localFdc = new Set(local.map(f => f.usda_fdc_id).filter(Boolean));
+  const mainCount = local.length + basics.filter(b => !localFdc.has(b.usda_fdc_id)).length;
+  if(mainCount < 3) await loadUsda();
+}
+
+/* ---- paso de cantidad: unidades caseras y cálculo en vivo ---- */
+
+/** Unidades posibles para un alimento: [{ label, grams|null, def }] (grams null = porción). */
+function unitOptions(f){
+  const per100 = Number(f.serving_grams) === 100 || /^100\s*g$/i.test(String(f.serving_label || '').trim());
+  const opts = [];
+  (f._units || []).forEach(u => opts.push({ label: u.label, grams: u.grams, def: 1 }));
+  if(per100 || f.serving_grams){
+    opts.push({ label: 'g', grams: 1, def: per100 ? 100 : Number(f.serving_grams) });
+  }
+  if(!per100) opts.unshift({ label: `porción (${f.serving_label})`, grams: null, def: 1 });
+  return opts;
+}
+
+/** multiplicador de la porción de referencia del alimento */
+function quantityFor(f, unit, amount){
+  if(unit.grams == null) return amount;
+  const base = Number(f.serving_grams) || 100;
+  return (amount * unit.grams) / base;
+}
+
+function amountLabel(unit, amount){
+  const n = Number.isInteger(amount) ? amount : Math.round(amount * 100) / 100;
+  if(unit.label === 'g') return `${n} g`;
+  if(unit.grams == null) return n === 1 ? '1 porción' : `${n} porciones`;
+  return `${n} ${unit.label}`;
 }
 
 async function openQuantityStep(foodResult){
@@ -640,13 +734,113 @@ async function openQuantityStep(foodResult){
   card.className = 'form-card';
   card.style.setProperty('--cat-color', CAT_COLOR.comida);
 
+  const f = withUnits(foodResult);
+  const units = unitOptions(f);
+  let unit = units[0];
   const momento = guessMomento();
   card.innerHTML = `
     <h3><span>🍽️</span> Comida</h3>
     <div class="selected-food-card">
       <button class="sf-change" id="changeFoodBtn" type="button">cambiar</button>
-      <div class="sf-name">${escapeHtml(foodResult.name)}</div>
-      <div class="sf-sub">${escapeHtml(foodResult.serving_label)} · ${foodResult.kcal != null ? foodResult.kcal + ' kcal / porción' : 'sin datos de kcal'}</div>
+      <div class="sf-name">${escapeHtml(f.name)}${f._kind === 'basic' ? ' <span class="fr-check">✓</span>' : ''}</div>
+      <div class="sf-sub">${foodMeta(f)}</div>
+    </div>
+    <div class="field">
+      <label>Cantidad</label>
+      <div class="qty-row">
+        <input type="number" id="f_qty" value="${unit.def}" min="0" step="any" inputmode="decimal">
+        <div class="chip-row unit-chips">
+          ${units.map((u, i) => `<button type="button" class="chip${i === 0 ? ' selected' : ''}" data-unit="${i}">${escapeHtml(u.label)}${u.grams && u.label !== 'g' ? ` <span class="chip-g">${Math.round(u.grams)} g</span>` : ''}</button>`).join('')}
+        </div>
+      </div>
+    </div>
+    <div class="calc-box" id="qtyCalc"></div>
+    <div class="row-2">
+      <div class="field"><label>Fecha</label><input type="date" id="f_fecha" value="${todayStr()}"></div>
+      <div class="field"><label>Hora</label><input type="time" id="f_hora" value="${nowStr()}"></div>
+    </div>
+    <div class="field">
+      <label>Momento</label>
+      <select id="f_momento">
+        ${['Desayuno','Almuerzo','Cena','Snack'].map(o => `<option value="${o}" ${o===momento?'selected':''}>${o}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-actions">
+      <button class="btn-ghost" id="cancelBtn">Cancelar</button>
+      <button class="btn-primary" id="saveBtn" style="--cat-color: var(--c-comida)">Guardar</button>
+    </div>
+  `;
+  formArea.appendChild(card);
+
+  const qtyInput = card.querySelector('#f_qty');
+  const calc = card.querySelector('#qtyCalc');
+  const fmt = v => (v == null ? '–' : Math.round(v));
+  const updateCalc = () => {
+    const q = quantityFor(f, unit, Number(qtyInput.value) || 0);
+    const v = k => (f[k] == null ? null : Number(f[k]) * q);
+    const grams = unit.grams != null ? Math.round((Number(qtyInput.value) || 0) * unit.grams) : null;
+    calc.innerHTML = `<b>${fmt(v('kcal'))} kcal</b>${grams != null && unit.label !== 'g' ? ` · ${grams} g` : ''}
+      <br>Proteína <b>${fmt(v('protein_g'))} g</b> · Carbos <b>${fmt(v('carbs_g'))} g</b> · Grasa <b>${fmt(v('fat_g'))} g</b>`;
+  };
+  card.querySelectorAll('[data-unit]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      card.querySelectorAll('[data-unit]').forEach(b => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      unit = units[Number(btn.dataset.unit)];
+      qtyInput.value = unit.def;
+      updateCalc();
+    });
+  });
+  qtyInput.addEventListener('input', updateCalc);
+  updateCalc();
+
+  card.querySelector('#changeFoodBtn').addEventListener('click', openFoodForm);
+  card.querySelector('#cancelBtn').addEventListener('click', closeForm);
+  card.querySelector('#saveBtn').addEventListener('click', async () => {
+    const amount = Number(qtyInput.value);
+    if(!(amount > 0)){ showToast('Escribe una cantidad'); return; }
+    const saveBtn = card.querySelector('#saveBtn');
+    saveBtn.disabled = true; saveBtn.textContent = 'Guardando...';
+    try{
+      let foodRow = f;
+      if(f.source === 'usda' && !f.id){
+        foodRow = await cacheUsdaFood(f, user.id, user.email);
+      }
+      await logFood({
+        userId: user.id, foodRow,
+        quantity: quantityFor(f, unit, amount),
+        label: `${foodRow.name} · ${amountLabel(unit, amount)}`,
+        momento: card.querySelector('#f_momento').value,
+        date: card.querySelector('#f_fecha').value || todayStr(),
+        time: card.querySelector('#f_hora').value || nowStr()
+      });
+      closeForm();
+      showToast('Comida registrada');
+      await refreshAfterLog();
+    }catch(err){
+      showToast('Error: ' + err.message);
+      saveBtn.disabled = false; saveBtn.textContent = 'Guardar';
+    }
+  });
+}
+
+/* ---- agregar rápido: kcal y macros a mano, sin crear un alimento ---- */
+
+function openQuickAddForm(){
+  resetForm();
+  const card = document.createElement('div');
+  card.className = 'form-card';
+  card.style.setProperty('--cat-color', CAT_COLOR.comida);
+  const momento = guessMomento();
+  card.innerHTML = `
+    <h3><span>⚡</span> Agregar rápido</h3>
+    <p class="form-hint">Para algo que comes una sola vez: se registra en tu día, pero no se guarda como alimento.</p>
+    <div class="field"><label>Descripción (opcional)</label><input type="text" id="qa_name" placeholder="Ej: Cachapa en la carretera"></div>
+    <div class="field"><label>Calorías (kcal)</label><input type="number" id="qa_kcal" inputmode="decimal" min="0" step="any"></div>
+    <div class="row-3">
+      <div class="field"><label>Proteína (g)</label><input type="number" id="qa_protein" inputmode="decimal" min="0" step="any" placeholder="opcional"></div>
+      <div class="field"><label>Carbos (g)</label><input type="number" id="qa_carbs" inputmode="decimal" min="0" step="any" placeholder="opcional"></div>
+      <div class="field"><label>Grasa (g)</label><input type="number" id="qa_fat" inputmode="decimal" min="0" step="any" placeholder="opcional"></div>
     </div>
     <div class="row-2">
       <div class="field"><label>Fecha</label><input type="date" id="f_fecha" value="${todayStr()}"></div>
@@ -658,32 +852,29 @@ async function openQuantityStep(foodResult){
         ${['Desayuno','Almuerzo','Cena','Snack'].map(o => `<option value="${o}" ${o===momento?'selected':''}>${o}</option>`).join('')}
       </select>
     </div>
-    <div class="field">
-      <label>Cantidad (en porciones de ${escapeHtml(foodResult.serving_label)})</label>
-      <input type="number" id="f_qty" value="1" min="0.1" step="0.1" inputmode="decimal">
-    </div>
     <div class="form-actions">
-      <button class="btn-ghost" id="cancelBtn">Cancelar</button>
+      <button class="btn-ghost" id="cancelBtn">Volver</button>
       <button class="btn-primary" id="saveBtn" style="--cat-color: var(--c-comida)">Guardar</button>
     </div>
   `;
   formArea.appendChild(card);
-
-  card.querySelector('#changeFoodBtn').addEventListener('click', openFoodForm);
-  card.querySelector('#cancelBtn').addEventListener('click', closeForm);
+  card.querySelector('#cancelBtn').addEventListener('click', openFoodForm);
   card.querySelector('#saveBtn').addEventListener('click', async () => {
+    const num = id => { const v = card.querySelector(id).value; return v === '' ? null : Number(v); };
+    const kcal = num('#qa_kcal');
+    if(kcal == null || kcal < 0){ showToast('Escribe las calorías'); return; }
+    const foodRow = { id: null, name: card.querySelector('#qa_name').value.trim() || 'Agregado rápido' };
+    NUTRIENT_FIELDS.forEach(nf => { foodRow[nf.key] = null; });
+    Object.assign(foodRow, { kcal, protein_g: num('#qa_protein'), carbs_g: num('#qa_carbs'), fat_g: num('#qa_fat') });
     const saveBtn = card.querySelector('#saveBtn');
     saveBtn.disabled = true; saveBtn.textContent = 'Guardando...';
     try{
-      let foodRow = foodResult;
-      if(foodResult.source === 'usda' && !foodResult.id){
-        foodRow = await cacheUsdaFood(foodResult, user.id, user.email);
-      }
-      const qty = Number(card.querySelector('#f_qty').value) || 1;
-      const fecha = card.querySelector('#f_fecha').value || todayStr();
-      const hora = card.querySelector('#f_hora').value || nowStr();
-      const momentoVal = card.querySelector('#f_momento').value;
-      await logFood({ userId: user.id, foodRow, quantity: qty, momento: momentoVal, date: fecha, time: hora });
+      await logFood({
+        userId: user.id, foodRow, quantity: 1,
+        momento: card.querySelector('#f_momento').value,
+        date: card.querySelector('#f_fecha').value || todayStr(),
+        time: card.querySelector('#f_hora').value || nowStr()
+      });
       closeForm();
       showToast('Comida registrada');
       await refreshAfterLog();
@@ -770,7 +961,7 @@ function entryRow(e){
   let summary = '';
   if(e.kind === 'food'){
     const d = e.data;
-    summary = `${d.momento}: ${escapeHtml(d.food_name_snapshot)} x${d.quantity}${d.kcal != null ? ` · ${Math.round(d.kcal)} kcal` : ''}`;
+    summary = `${d.momento}: ${escapeHtml(foodLogLabel(d))}${d.kcal != null ? ` · ${Math.round(d.kcal)} kcal` : ''}`;
   } else {
     const t = TYPES[e.type];
     summary = escapeHtml(t ? t.summary(e.data) : '');
