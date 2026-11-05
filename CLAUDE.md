@@ -18,12 +18,15 @@ Estado y pendientes: página "Asclepio" en Notion (https://app.notion.com/p/40d4
 
 - `index.html`: login, pestañas (Hoy, Historial, Ranking, Datos), hoja inferior para formularios.
 - `css/styles.css`: tema oscuro, sin bordes duros, hoja inferior, tab bar fija.
-- `js/app.js`: lógica principal y pantallas. `js/auth.js`, `js/foods.js` (búsqueda, traducción y orden por relevancia), `js/foodDict.js` (diccionario español → búsqueda en inglés), `js/basics.js` (110 básicos con valores de USDA por fdcId y porciones caseras; salen primero al buscar, como los "Best Match" de MyFitnessPal), `js/activity.js`, `js/report.js`, `js/config.js`, `js/supabaseClient.js`.
+- `js/app.js`: lógica principal y pantallas. `js/auth.js`, `js/foods.js` (búsqueda, traducción y orden por relevancia), `js/foodDict.js` (diccionario español → búsqueda en inglés), `js/basics.js` (110 básicos con valores de USDA por fdcId y porciones caseras; salen primero al buscar, como los "Best Match" de MyFitnessPal), `js/activity.js`, `js/report.js`, `js/config.js`, `js/supabaseClient.js`, `js/health.js` (fase 2: metas por día, perfil físico y cálculo de metas, peso, suplementos, agua y electrolitos, combos).
+- Micronutrientes: las 15 columnas fijas siguen igual; los nuevos (magnesio, zinc, B6, folato, omega-3) van en `micros` (JSONB) de `foods` y `food_logs`. Para agregar otro, súmalo a `MICRO_FIELDS` en `foods.js` (y a `basics.js` si quieres valores de los básicos), sin tocar la tabla.
+- Datos privados (peso, edad, altura) van en tablas propias con RLS, nunca en `profiles` (esa tabla la ven los 3).
+- Agua, suplementos y peso no cuentan para la racha (decisión de Santiago).
 - `sql/`: esquema y migraciones que Santiago ejecuta a mano en el SQL Editor de Supabase.
 
 ## Reglas de trabajo
 
-- Cache-busting: los imports y el CSS llevan `?v=N` (ahora `?v=8`). Cada vez que cambies archivos, sube N en todos los imports, en `index.html` y en `supabaseClient.js`. Si no, Chrome y la app instalada muestran archivos viejos.
+- Cache-busting: los imports y el CSS llevan `?v=N` (ahora `?v=9`). Cada vez que cambies archivos, sube N en todos los imports, en `index.html` y en `supabaseClient.js`. Si no, Chrome y la app instalada muestran archivos viejos.
 - Todo el texto visible va en español.
 - Los cambios de base de datos van siempre en un archivo nuevo en `sql/`, idempotente (`if not exists`, `on conflict`, etc.). Nunca edites el esquema ya ejecutado. Al terminar, di a Santiago qué archivo ejecutar y en qué orden.
 - Tablas creadas por SQL necesitan `GRANT` a `authenticated` además de las políticas RLS (ya nos mordió: "permission denied for table").

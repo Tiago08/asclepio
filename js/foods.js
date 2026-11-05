@@ -1,6 +1,6 @@
-import { supabase } from './supabaseClient.js?v=8';
-import { USDA_API_KEY } from './config.js?v=8';
-import { dictQueryToEnglish, normalizeText } from './foodDict.js?v=8';
+import { supabase } from './supabaseClient.js?v=9';
+import { USDA_API_KEY } from './config.js?v=9';
+import { dictQueryToEnglish, normalizeText } from './foodDict.js?v=9';
 
 // Campos nutricionales que manejamos en toda la app, en el orden
 // en que se muestran. Un solo lugar para no desincronizar listas.
@@ -21,6 +21,35 @@ export const NUTRIENT_FIELDS = [
   { key: 'vit_d_mcg', label: 'Vitamina D', unit: 'mcg' },
   { key: 'vit_b12_mcg', label: 'Vitamina B12', unit: 'mcg' }
 ];
+
+// Micronutrientes del campo flexible "micros" (JSONB). Para agregar uno nuevo
+// basta con sumarlo aquí (y su número de USDA abajo): no hay que tocar la tabla.
+export const MICRO_FIELDS = [
+  { key: 'magnesium_mg', label: 'Magnesio', unit: 'mg' },
+  { key: 'zinc_mg', label: 'Zinc', unit: 'mg' },
+  { key: 'vit_b6_mg', label: 'Vitamina B6', unit: 'mg' },
+  { key: 'folate_mcg', label: 'Folato', unit: 'mcg' },
+  { key: 'omega3_mg', label: 'Omega-3 (EPA+DHA)', unit: 'mg' }
+];
+
+// número de nutriente de USDA -> campo de "micros" (EPA y DHA se suman aparte)
+const USDA_MICRO_MAP = {
+  '304': 'magnesium_mg', '1090': 'magnesium_mg',
+  '309': 'zinc_mg', '1095': 'zinc_mg',
+  '415': 'vit_b6_mg', '1175': 'vit_b6_mg',
+  '435': 'folate_mcg', '1190': 'folate_mcg'
+};
+const USDA_FOLATE_TOTAL = ['417', '1177'];   // si no trae folato DFE, se usa el total
+const USDA_EPA = ['629', '1278'], USDA_DHA = ['621', '1272'];   // en gramos
+
+/** Multiplica cada micro por la cantidad; devuelve un objeto nuevo. */
+export function scaleMicros(micros, q) {
+  const out = {};
+  for (const [k, v] of Object.entries(micros || {})) {
+    if (v != null && Number.isFinite(Number(v))) out[k] = Math.round(Number(v) * Number(q) * 1000) / 1000;
+  }
+  return out;
+}
 
 // nutrientNumber (USDA, estable entre bases) -> nuestro campo
 const USDA_NUTRIENT_MAP = {
@@ -177,13 +206,21 @@ function cleanUsdaName(food) {
 
 function usdaFoodToRow(food) {
   const row = emptyNutrients();
+  const micros = {};
+  let folateTotal = null, omega = null;
   (food.foodNutrients || []).forEach(n => {
     const num = String(n.nutrientNumber ?? n.number ?? '');
+    const value = typeof n.value === 'number' ? n.value : (n.amount ?? null);
     const field = USDA_NUTRIENT_MAP[num];
-    if (field && row[field] == null) {
-      row[field] = typeof n.value === 'number' ? n.value : (n.amount ?? null);
-    }
+    if (field && row[field] == null) row[field] = value;
+    if (value == null) return;
+    const micro = USDA_MICRO_MAP[num];
+    if (micro && micros[micro] == null) micros[micro] = value;
+    if (USDA_FOLATE_TOTAL.includes(num)) folateTotal = value;
+    if (USDA_EPA.includes(num) || USDA_DHA.includes(num)) omega = (omega || 0) + value * 1000; // g -> mg
   });
+  if (micros.folate_mcg == null && folateTotal != null) micros.folate_mcg = folateTotal;
+  if (omega != null) micros.omega3_mg = Math.round(omega);
   const nameEn = cleanUsdaName(food);
   const cached = cachedSpanish(nameEn);
   const brand = food.brandName || food.brandOwner || null; // la marca, no la corporación
@@ -196,6 +233,7 @@ function usdaFoodToRow(food) {
     serving_label: '100 g',
     serving_grams: 100,
     ...row,
+    micros,
     // campos internos (empiezan por "_"): no se guardan en la base de datos
     _en: nameEn,
     _kind: food.dataType === 'Branded' ? 'branded' : 'generic',
@@ -432,6 +470,7 @@ export async function logFood({ userId, foodRow, quantity, momento, date, time, 
     const base = foodRow[f.key];
     payload[f.key] = (base === null || base === undefined) ? null : Number(base) * Number(quantity);
   });
+  payload.micros = scaleMicros(foodRow.micros, quantity);
   const { data, error } = await supabase.from('food_logs').insert(payload).select().single();
   if (error) throw error;
   return data;

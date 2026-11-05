@@ -15,6 +15,8 @@
   --c-sueno: #8a7fd1;
   --c-energia: #d9c23a;
   --c-nota: #b8b8b8;
+  --c-agua: #5aa9e6;
+  --c-supl: #c98bd9;
 
   --r-lg: 20px;
   --r-md: 14px;
@@ -386,3 +388,54 @@ header{
 }
 .calc-box b{ font-family: 'IBM Plex Mono', monospace; color: var(--text); font-weight: 500; }
 .macro-top .goal{ color: var(--text-faint); font-weight: 400; }
+
+/* ---------- hoy: agua y suplementos (fase 2) ---------- */
+#ringRow .today-card{ margin-bottom: 10px; }
+.daily-card{
+  background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--shadow-sm);
+  padding: 14px 16px 12px; margin: 0 0 18px;
+}
+.dc-water{ display: block; width: 100%; background: none; border: none; padding: 0; text-align: left; }
+.dc-water .kh-top{ display: flex; margin-bottom: 8px; }
+.dc-num{ font-size: 13px; color: var(--text-dim); }
+.dc-num b{ font-family: 'IBM Plex Mono', monospace; font-size: 17px; color: var(--text); font-weight: 600; }
+.dc-bar{ display: block; height: 6px; margin-bottom: 10px; }
+.dc-bar .kh-bar-fill{ display: block; }
+.dc-btns{ display: flex; gap: 8px; flex-wrap: wrap; --cat-color: var(--c-agua); }
+.dc-btns .chip{ padding: 7px 12px; font-size: 12.5px; }
+.dc-btns .chip:active{ background: var(--surface-raised); }
+.dc-elec{ font-size: 11.5px; color: var(--text-faint); margin-top: 9px; }
+.dc-elec b{ font-family: 'IBM Plex Mono', monospace; color: var(--text-dim); font-weight: 500; }
+.dc-supps{ display: flex; gap: 8px; overflow-x: auto; margin-top: 10px; --cat-color: var(--c-supl); scrollbar-width: none; }
+.dc-supps::-webkit-scrollbar{ display: none; }
+.dc-supps .chip{ flex: 0 0 auto; padding: 7px 12px; font-size: 12.5px; white-space: nowrap; }
+.supp-add{ color: var(--text-faint) !important; }
+
+/* listas cortas dentro de la hoja (combos, agua, suplementos, peso) */
+.combo-items{ background: var(--surface-sunken); border-radius: var(--r-md); }
+.combo-item{ display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; font-size: 13.5px; }
+.combo-item + .combo-item{ border-top: 1px solid var(--surface); }
+.combo-item .entry-del{ float: none; }
+.ci-right{ display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-faint); white-space: nowrap; }
+.ci-dose{ color: var(--text-faint); font-size: 12px; }
+.combo-items + .calc-box{ margin-top: 12px; }
+
+/* porciones caseras de alimentos propios */
+.sf-units{ display: block; margin-top: 8px; padding: 0; background: none; border: none; color: var(--accent); font-size: 12px; }
+.unit-edit-row{ display: grid; grid-template-columns: 1.4fr 1fr; gap: 8px; margin-bottom: 8px; }
+.unit-edit-row input{
+  width: 100%; background: var(--surface-sunken); border: none; border-radius: var(--r-sm);
+  color: var(--text); padding: 11px 12px; font-size: 16px; font-family: inherit;
+}
+.more-fields{ margin: 4px 0 12px; }
+.more-fields summary{ font-size: 12.5px; color: var(--accent); padding: 8px 0; cursor: pointer; list-style: none; }
+.more-fields summary::-webkit-details-marker{ display: none; }
+.more-fields summary::before{ content: '▸ '; }
+.more-fields[open] summary::before{ content: '▾ '; }
+
+/* peso */
+.weight-row{ display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }
+.weight-row .field{ margin-bottom: 12px; }
+.data-card .weight-row .btn-primary{ width: auto; padding: 12px 18px; margin-bottom: 12px; }
+.weight-chart{ display: block; width: 100%; height: 70px; margin: 4px 0 4px; }
+.weight-diff{ font-size: 12px; color: var(--text-dim); margin-bottom: 10px; }

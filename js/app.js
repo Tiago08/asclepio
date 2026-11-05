@@ -1,15 +1,21 @@
-import { supabase } from './supabaseClient.js?v=8';
+import { supabase } from './supabaseClient.js?v=9';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js?v=8';
+} from './auth.js?v=9';
 import {
-  NUTRIENT_FIELDS, searchUsda, searchLocalFoods, searchFavorites,
+  NUTRIENT_FIELDS, MICRO_FIELDS, searchUsda, searchLocalFoods, searchFavorites, updateFood,
   cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel
-} from './foods.js?v=8';
-import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=8';
-import { buildReportText, downloadText } from './report.js?v=8';
-import { BASICS, searchBasics } from './basics.js?v=8';
+} from './foods.js?v=9';
+import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=9';
+import { buildReportText, downloadText } from './report.js?v=9';
+import { BASICS, searchBasics } from './basics.js?v=9';
+import {
+  getGoalHistory, saveGoalsFrom, goalsForDate, getBodyProfile, saveBodyProfile, suggestGoals,
+  getWeights, saveWeight, deleteWeight, getSupplements, addSupplement, retireSupplement,
+  getSupplementLogs, getSupplementLogsInRange, setSupplementTaken, getWaterLogs, addWater, deleteWater,
+  electrolyteTotals, getCombos, createCombo, deleteCombo
+} from './health.js?v=9';
 
 /* ================= utilidades de hora ================= */
 
@@ -157,6 +163,19 @@ let session = null;
 let user = null;
 let profile = null;
 let bootedFor = null;   // evita repetir el arranque cuando Supabase refresca el token
+
+// fase 2
+let goalHistory = [];       // metas con la fecha desde la que valen
+let bodyProfile = null;     // sexo, año de nacimiento, altura, objetivo, días de entreno
+let weights = [];           // pesos, el más reciente primero
+let supplements = [];       // tu pila activa
+let takenToday = new Set(); // ids de suplementos marcados hoy
+let waterToday = [];        // vasos y bebidas de hoy
+let todayFoodRows = [];     // food_logs de hoy (para electrolitos)
+let combos = [];            // combos con sus ítems
+let comboDraft = null;      // combo que se está armando: { name, items: [{ food, quantity, label }] }
+
+function goalsFor(date){ return goalsForDate(goalHistory, profile, date); }
 
 /* ================= DOM refs ================= */
 
@@ -322,10 +341,31 @@ async function bootApp(){
     return;
   }
   document.getElementById('displayNameInput').value = profile.display_name;
+  await loadPhase2Data();
   fillGoalInputs();
+  fillBodyInputs();
+  renderWeights();
   await Promise.all([renderFavorites(), renderToday(), renderStats(), renderRanking()]);
   renderHistoryPlaceholder();
 }
+
+/** Datos de la fase 2. Si la migración fase2.sql no se ha corrido, la app sigue funcionando sin ellos. */
+async function loadPhase2Data(){
+  const today = todayStr();
+  const safe = (p, fallback) => p.catch(err => { console.warn('fase 2:', err.message || err); phase2Error = err; return fallback; });
+  phase2Error = null;
+  [goalHistory, bodyProfile, weights, supplements, takenToday, waterToday, combos] = await Promise.all([
+    safe(getGoalHistory(user.id), []),
+    safe(getBodyProfile(user.id), null),
+    safe(getWeights(user.id), []),
+    safe(getSupplements(user.id), []),
+    safe(getSupplementLogs(user.id, today), new Set()),
+    safe(getWaterLogs(user.id, today), []),
+    safe(getCombos(user.id), [])
+  ]);
+  if(phase2Error) showError('Falta correr sql/fase2.sql en Supabase: ' + (phase2Error.message || phase2Error));
+}
+let phase2Error = null;
 
 /* ================= quick grid ================= */
 
@@ -554,10 +594,20 @@ let foodSearchSeq = 0;
 // básicos por fdcId, para dar porciones caseras a copias ya guardadas en la tabla
 const BASICS_BY_FDC = new Map(BASICS.map(b => [b.usda_fdc_id, b]));
 function withUnits(f){
-  if(f._units || f.source !== 'usda') return f;
+  if(f._units) return f;
+  if(f.source !== 'usda'){
+    // alimento propio: sus porciones caseras están en la columna "units"
+    if(Array.isArray(f.units) && f.units.length){
+      f._units = f.units.filter(u => u && u.label && Number(u.grams) > 0).map(u => ({ label: u.label, grams: Number(u.grams) }));
+    }
+    return f;
+  }
   const b = BASICS_BY_FDC.get(f.usda_fdc_id);
-  // una copia guardada de un básico sigue siendo básico (✓, porciones y orden)
-  return b ? Object.assign(f, { _units: b._units, _kind: 'basic', _rank: b._rank }) : f;
+  if(!b) return f;
+  // una copia guardada de un básico sigue siendo básico (✓, porciones y orden);
+  // si se guardó antes de la fase 2 no tiene micros: se toman del básico
+  const micros = f.micros && Object.keys(f.micros).length ? f.micros : b.micros;
+  return Object.assign(f, { _units: b._units, _kind: 'basic', _rank: b._rank, micros });
 }
 
 function foodMeta(f){
@@ -578,25 +628,30 @@ function openFoodForm(){
   const card = document.createElement('div');
   card.className = 'form-card';
   card.style.setProperty('--cat-color', CAT_COLOR.comida);
+  const inCombo = !!comboDraft;
   card.innerHTML = `
-    <h3><span>🍽️</span> Comida</h3>
+    <h3><span>${inCombo ? '🧺' : '🍽️'}</span> ${inCombo ? 'Agregar al combo' : 'Comida'}</h3>
     <div class="field">
       <label>Buscar alimento</label>
       <input type="search" id="foodSearchInput" placeholder="arroz, cambur, Savoy..." autocomplete="off" enterkeyhint="search">
     </div>
     <div id="foodSearchResults"></div>
     <div class="food-extra-actions">
-      <button class="add-new-food-btn" id="quickAddBtn" type="button">⚡ Agregar rápido (kcal y macros a mano)</button>
+      ${inCombo ? '' : '<button class="add-new-food-btn" id="quickAddBtn" type="button">⚡ Agregar rápido (kcal y macros a mano)</button>'}
       <button class="add-new-food-btn" id="addNewFoodBtn" type="button">+ Crear un alimento nuevo</button>
+      ${inCombo ? '' : '<button class="add-new-food-btn" id="newComboBtn" type="button">🧺 Crear un combo (varios alimentos juntos)</button>'}
     </div>
     <div class="form-actions">
-      <button class="btn-ghost" id="cancelFoodBtn">Cancelar</button>
+      <button class="btn-ghost" id="cancelFoodBtn">${inCombo ? 'Volver al combo' : 'Cancelar'}</button>
     </div>
   `;
   formArea.appendChild(card);
-  card.querySelector('#cancelFoodBtn').addEventListener('click', closeForm);
+  card.querySelector('#cancelFoodBtn').addEventListener('click', inCombo ? openComboBuilder : closeForm);
   card.querySelector('#addNewFoodBtn').addEventListener('click', openNewFoodForm);
-  card.querySelector('#quickAddBtn').addEventListener('click', openQuickAddForm);
+  if(!inCombo){
+    card.querySelector('#quickAddBtn').addEventListener('click', openQuickAddForm);
+    card.querySelector('#newComboBtn').addEventListener('click', () => { comboDraft = { name: '', items: [] }; openComboBuilder(); });
+  }
 
   const input = card.querySelector('#foodSearchInput');
   const resultsWrap = card.querySelector('#foodSearchResults');
@@ -616,14 +671,30 @@ function openFoodForm(){
 /** Sin escribir nada: lo que más registras, para tocar y listo. */
 function renderRecentFoods(resultsWrap){
   const items = usedFoods.slice(0, MAX_MAIN_RESULTS).map(withUnits);
-  if(!items.length){
+  const showCombos = !comboDraft && combos.length > 0;
+  if(!items.length && !showCombos){
     resultsWrap.innerHTML = `<div class="search-empty">Escribe para buscar. Lo que registres aparecerá aquí la próxima vez.</div>`;
     return;
   }
-  resultsWrap.innerHTML = `<div class="search-section-title">Frecuentes</div>
-    <div class="food-search-results">${foodListHtml(items)}</div>`;
+  let html = '';
+  if(showCombos){
+    html += `<div class="search-section-title">Tus combos</div>
+      <div class="food-search-results">${combos.map((c, i) => `
+        <div class="food-result" data-combo="${i}">
+          <div class="fr-name">🧺 ${escapeHtml(c.name)}</div>
+          <div class="fr-meta">${c.items.length} alimento${c.items.length === 1 ? '' : 's'} · ${Math.round(comboKcal(c))} kcal</div>
+        </div>`).join('')}</div>`;
+  }
+  if(items.length){
+    html += `<div class="search-section-title">Frecuentes</div>
+      <div class="food-search-results">${foodListHtml(items)}</div>`;
+  }
+  resultsWrap.innerHTML = html;
   resultsWrap.querySelectorAll('[data-idx]').forEach(el => {
     el.addEventListener('click', () => openQuantityStep(items[Number(el.dataset.idx)]));
+  });
+  resultsWrap.querySelectorAll('[data-combo]').forEach(el => {
+    el.addEventListener('click', () => openComboLog(combos[Number(el.dataset.combo)]));
   });
 }
 
@@ -738,12 +809,15 @@ async function openQuantityStep(foodResult){
   const units = unitOptions(f);
   let unit = units[0];
   const momento = guessMomento();
+  const inCombo = !!comboDraft;
+  const canEditUnits = f.source === 'custom' && f.id;
   card.innerHTML = `
-    <h3><span>🍽️</span> Comida</h3>
+    <h3><span>${inCombo ? '🧺' : '🍽️'}</span> ${inCombo ? 'Agregar al combo' : 'Comida'}</h3>
     <div class="selected-food-card">
       <button class="sf-change" id="changeFoodBtn" type="button">cambiar</button>
       <div class="sf-name">${escapeHtml(f.name)}${f._kind === 'basic' ? ' <span class="fr-check">✓</span>' : ''}</div>
       <div class="sf-sub">${foodMeta(f)}</div>
+      ${canEditUnits ? `<button class="sf-units" id="editUnitsBtn" type="button">${f._units && f._units.length ? 'editar porciones caseras' : '+ porciones caseras (unidad, taza…)'}</button>` : ''}
     </div>
     <div class="field">
       <label>Cantidad</label>
@@ -755,6 +829,7 @@ async function openQuantityStep(foodResult){
       </div>
     </div>
     <div class="calc-box" id="qtyCalc"></div>
+    ${inCombo ? '' : `
     <div class="row-2">
       <div class="field"><label>Fecha</label><input type="date" id="f_fecha" value="${todayStr()}"></div>
       <div class="field"><label>Hora</label><input type="time" id="f_hora" value="${nowStr()}"></div>
@@ -764,13 +839,14 @@ async function openQuantityStep(foodResult){
       <select id="f_momento">
         ${['Desayuno','Almuerzo','Cena','Snack'].map(o => `<option value="${o}" ${o===momento?'selected':''}>${o}</option>`).join('')}
       </select>
-    </div>
+    </div>`}
     <div class="form-actions">
-      <button class="btn-ghost" id="cancelBtn">Cancelar</button>
-      <button class="btn-primary" id="saveBtn" style="--cat-color: var(--c-comida)">Guardar</button>
+      <button class="btn-ghost" id="cancelBtn">${inCombo ? 'Volver al combo' : 'Cancelar'}</button>
+      <button class="btn-primary" id="saveBtn" style="--cat-color: var(--c-comida)">${inCombo ? 'Agregar al combo' : 'Guardar'}</button>
     </div>
   `;
   formArea.appendChild(card);
+  if(canEditUnits) card.querySelector('#editUnitsBtn').addEventListener('click', () => openUnitsEditor(f));
 
   const qtyInput = card.querySelector('#f_qty');
   const calc = card.querySelector('#qtyCalc');
@@ -795,16 +871,23 @@ async function openQuantityStep(foodResult){
   updateCalc();
 
   card.querySelector('#changeFoodBtn').addEventListener('click', openFoodForm);
-  card.querySelector('#cancelBtn').addEventListener('click', closeForm);
+  card.querySelector('#cancelBtn').addEventListener('click', inCombo ? openComboBuilder : closeForm);
   card.querySelector('#saveBtn').addEventListener('click', async () => {
     const amount = Number(qtyInput.value);
     if(!(amount > 0)){ showToast('Escribe una cantidad'); return; }
     const saveBtn = card.querySelector('#saveBtn');
+    const idleLabel = saveBtn.textContent;
     saveBtn.disabled = true; saveBtn.textContent = 'Guardando...';
     try{
       let foodRow = f;
       if(f.source === 'usda' && !f.id){
-        foodRow = await cacheUsdaFood(f, user.id, user.email);
+        // un combo necesita el id del alimento: la copia de USDA se guarda ya
+        foodRow = withUnits(await cacheUsdaFood(f, user.id, user.email));
+      }
+      if(inCombo){
+        comboDraft.items.push({ food: foodRow, quantity: quantityFor(f, unit, amount), label: `${foodRow.name} · ${amountLabel(unit, amount)}` });
+        openComboBuilder();
+        return;
       }
       await logFood({
         userId: user.id, foodRow,
@@ -819,7 +902,188 @@ async function openQuantityStep(foodResult){
       await refreshAfterLog();
     }catch(err){
       showToast('Error: ' + err.message);
-      saveBtn.disabled = false; saveBtn.textContent = 'Guardar';
+      saveBtn.disabled = false; saveBtn.textContent = idleLabel;
+    }
+  });
+}
+
+/* ---- porciones caseras de un alimento propio ---- */
+
+/** Filas editables de porciones caseras: [{label, grams}] */
+function unitsRowsHtml(units){
+  const rows = (units && units.length ? units : [{ label: '', grams: '' }]);
+  return rows.map(u => `
+    <div class="unit-edit-row">
+      <input type="text" data-unit-label placeholder="unidad, taza…" value="${escapeHtml(u.label || '')}">
+      <input type="number" data-unit-grams inputmode="decimal" min="0" step="any" placeholder="gramos" value="${u.grams || ''}">
+    </div>`).join('');
+}
+function readUnits(container){
+  return [...container.querySelectorAll('.unit-edit-row')].map(r => ({
+    label: r.querySelector('[data-unit-label]').value.trim(),
+    grams: Number(r.querySelector('[data-unit-grams]').value)
+  })).filter(u => u.label && u.grams > 0);
+}
+function wireUnitsEditor(card){
+  card.querySelector('#addUnitRowBtn').addEventListener('click', () => {
+    card.querySelector('#unitRows').insertAdjacentHTML('beforeend', unitsRowsHtml([]));
+  });
+}
+
+function openUnitsEditor(food){
+  resetForm();
+  const card = document.createElement('div');
+  card.className = 'form-card';
+  card.style.setProperty('--cat-color', CAT_COLOR.comida);
+  card.innerHTML = `
+    <h3><span>🥄</span> Porciones caseras</h3>
+    <p class="form-hint">${escapeHtml(food.name)}. Para calcular, la app necesita saber cuánto pesa tu porción de referencia (${escapeHtml(food.serving_label)}).</p>
+    <div class="field"><label>Peso de "${escapeHtml(food.serving_label)}" (g)</label>
+      <input type="number" id="ue_serving_g" inputmode="decimal" min="0" step="any" value="${food.serving_grams || ''}" placeholder="Ej: 98"></div>
+    <div class="field"><label>Porciones (nombre y gramos)</label><div id="unitRows">${unitsRowsHtml(food._units)}</div></div>
+    <button class="add-new-food-btn" id="addUnitRowBtn" type="button">+ otra porción</button>
+    <div class="form-actions">
+      <button class="btn-ghost" id="cancelBtn">Volver</button>
+      <button class="btn-primary" id="saveBtn">Guardar</button>
+    </div>`;
+  formArea.appendChild(card);
+  wireUnitsEditor(card);
+  card.querySelector('#cancelBtn').addEventListener('click', () => openQuantityStep(food));
+  card.querySelector('#saveBtn').addEventListener('click', async (ev) => {
+    const servingG = Number(card.querySelector('#ue_serving_g').value);
+    const units = readUnits(card);
+    if(units.length && !(servingG > 0)){ showToast('Falta el peso de la porción de referencia'); return; }
+    ev.currentTarget.disabled = true;
+    try{
+      const updated = await updateFood(food.id, { serving_grams: servingG > 0 ? servingG : null, units });
+      // se actualiza el mismo objeto para que "Frecuentes" no muestre las porciones viejas
+      Object.assign(food, updated, { _units: undefined });
+      showToast('Porciones guardadas');
+      openQuantityStep(food);
+    }catch(err){
+      showToast('Error: ' + err.message);
+      ev.currentTarget.disabled = false;
+    }
+  });
+}
+
+/* ---- combos ---- */
+
+function comboKcal(c){
+  return c.items.reduce((s, it) => s + (it.food && it.food.kcal != null ? Number(it.food.kcal) * Number(it.quantity) : 0), 0);
+}
+
+function openComboBuilder(){
+  resetForm();
+  const card = document.createElement('div');
+  card.className = 'form-card';
+  card.style.setProperty('--cat-color', CAT_COLOR.comida);
+  const d = comboDraft;
+  card.innerHTML = `
+    <h3><span>🧺</span> Combo nuevo</h3>
+    <p class="form-hint">Varios alimentos que sueles comer juntos. Después lo registras con un toque.</p>
+    <div class="field"><label>Nombre</label><input type="text" id="combo_name" placeholder="Ej: Desayuno de siempre" value="${escapeHtml(d.name)}"></div>
+    <div class="field"><label>Alimentos</label>
+      ${d.items.length ? `<div class="combo-items">${d.items.map((it, i) => `
+        <div class="combo-item"><span>${escapeHtml(it.label)}</span>
+          <span class="ci-right mono">${it.food.kcal != null ? Math.round(it.food.kcal * it.quantity) + ' kcal' : ''}
+          <button class="entry-del" data-rm-item="${i}" type="button">quitar</button></span></div>`).join('')}</div>`
+        : '<div class="search-empty">Todavía no hay alimentos.</div>'}
+    </div>
+    <button class="add-new-food-btn" id="addComboItemBtn" type="button">+ Agregar alimento</button>
+    <div class="form-actions">
+      <button class="btn-ghost" id="cancelBtn">Cancelar</button>
+      <button class="btn-primary" id="saveBtn">Guardar combo</button>
+    </div>`;
+  formArea.appendChild(card);
+  const nameInput = card.querySelector('#combo_name');
+  nameInput.addEventListener('input', () => { d.name = nameInput.value; });
+  card.querySelector('#addComboItemBtn').addEventListener('click', openFoodForm);
+  card.querySelectorAll('[data-rm-item]').forEach(b => b.addEventListener('click', () => {
+    d.items.splice(Number(b.dataset.rmItem), 1);
+    openComboBuilder();
+  }));
+  card.querySelector('#cancelBtn').addEventListener('click', () => { comboDraft = null; openFoodForm(); });
+  card.querySelector('#saveBtn').addEventListener('click', async (ev) => {
+    const name = d.name.trim();
+    if(!name){ showToast('Ponle un nombre al combo'); return; }
+    if(!d.items.length){ showToast('Agrega al menos un alimento'); return; }
+    ev.currentTarget.disabled = true; ev.currentTarget.textContent = 'Guardando...';
+    try{
+      await createCombo(user.id, name, d.items.map(it => ({ food_id: it.food.id, quantity: it.quantity, label: it.label })));
+      combos = await getCombos(user.id);
+      comboDraft = null;
+      showToast('Combo guardado');
+      openFoodForm();
+    }catch(err){
+      showToast('Error: ' + err.message);
+      ev.currentTarget.disabled = false; ev.currentTarget.textContent = 'Guardar combo';
+    }
+  });
+}
+
+function openComboLog(combo){
+  resetForm();
+  const card = document.createElement('div');
+  card.className = 'form-card';
+  card.style.setProperty('--cat-color', CAT_COLOR.comida);
+  const momento = guessMomento();
+  card.innerHTML = `
+    <h3><span>🧺</span> ${escapeHtml(combo.name)}</h3>
+    <div class="combo-items">${combo.items.map(it => `
+      <div class="combo-item"><span>${escapeHtml(it.label)}</span>
+        <span class="ci-right mono">${it.food.kcal != null ? Math.round(it.food.kcal * it.quantity) + ' kcal' : ''}</span></div>`).join('')}</div>
+    <div class="calc-box"><b>${Math.round(comboKcal(combo))} kcal</b> en total</div>
+    <div class="row-2">
+      <div class="field"><label>Fecha</label><input type="date" id="f_fecha" value="${todayStr()}"></div>
+      <div class="field"><label>Hora</label><input type="time" id="f_hora" value="${nowStr()}"></div>
+    </div>
+    <div class="field">
+      <label>Momento</label>
+      <select id="f_momento">
+        ${['Desayuno','Almuerzo','Cena','Snack'].map(o => `<option value="${o}" ${o===momento?'selected':''}>${o}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-actions">
+      <button class="btn-ghost" id="cancelBtn">Volver</button>
+      <button class="btn-primary" id="saveBtn">Registrar combo</button>
+    </div>
+    <button class="btn-link" id="delComboBtn" type="button">Eliminar este combo</button>`;
+  formArea.appendChild(card);
+  card.querySelector('#cancelBtn').addEventListener('click', openFoodForm);
+  card.querySelector('#delComboBtn').addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    if(btn.dataset.confirm !== '1'){ btn.dataset.confirm = '1'; btn.textContent = 'Toca otra vez para eliminar (tus registros no se borran)'; return; }
+    try{
+      await deleteCombo(combo.id);
+      combos = combos.filter(c => c.id !== combo.id);
+      showToast('Combo eliminado');
+      openFoodForm();
+    }catch(err){ showToast('Error: ' + err.message); }
+  });
+  card.querySelector('#saveBtn').addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    btn.disabled = true; btn.textContent = 'Guardando...';
+    const common = {
+      userId: user.id,
+      momento: card.querySelector('#f_momento').value,
+      date: card.querySelector('#f_fecha').value || todayStr(),
+      time: card.querySelector('#f_hora').value || nowStr()
+    };
+    let done = 0;
+    try{
+      // uno por uno: si falla a la mitad, se sabe cuántos quedaron
+      for(const it of combo.items){
+        await logFood({ ...common, foodRow: withUnits(it.food), quantity: Number(it.quantity), label: it.label });
+        done++;
+      }
+      closeForm();
+      showToast(`${combo.name} registrado`);
+      await refreshAfterLog();
+    }catch(err){
+      showToast(`Error tras ${done} de ${combo.items.length}: ${err.message}`);
+      btn.disabled = false; btn.textContent = 'Registrar combo';
+      if(done) await refreshAfterLog();
     }
   });
 }
@@ -896,6 +1160,11 @@ function openNewFoodForm(){
       <label>${f.label} (${f.unit})</label>
       <input type="number" step="0.1" inputmode="decimal" data-nutri="${f.key}" placeholder="opcional">
     </div>`).join('');
+  const microInputs = MICRO_FIELDS.map(f => `
+    <div class="field">
+      <label>${f.label} (${f.unit})</label>
+      <input type="number" step="0.1" inputmode="decimal" data-micro="${f.key}" placeholder="opcional">
+    </div>`).join('');
 
   card.innerHTML = `
     <h3><span>🍽️</span> Alimento nuevo</h3>
@@ -904,27 +1173,51 @@ function openNewFoodForm(){
       <div class="field"><label>Categoría</label><input type="text" id="nf_cat" placeholder="Ej: Panadería"></div>
       <div class="field"><label>Porción de referencia</label><input type="text" id="nf_serving" placeholder="Ej: 100 g, 1 unidad" value="100 g"></div>
     </div>
+    <div class="field"><label>Peso de esa porción (g)</label><input type="number" id="nf_serving_g" inputmode="decimal" min="0" step="any" placeholder="opcional, ej: 98"></div>
     <p style="font-size:12px; color:var(--text-dim); margin: 2px 0 10px;">Los valores de abajo son por esa porción de referencia. Deja en blanco lo que no sepas — lo puedes completar después.</p>
     ${nutrientInputs}
+    <details class="more-fields">
+      <summary>Más nutrientes (magnesio, zinc, B6, folato, omega-3)</summary>
+      ${microInputs}
+    </details>
+    <details class="more-fields">
+      <summary>Porciones caseras (unidad, taza, rebanada…)</summary>
+      <p class="form-hint" style="margin-top:6px">Necesitan el peso de la porción de referencia de arriba.</p>
+      <div id="unitRows">${unitsRowsHtml([])}</div>
+      <button class="add-new-food-btn" id="addUnitRowBtn" type="button">+ otra porción</button>
+    </details>
     <div class="form-actions">
       <button class="btn-ghost" id="cancelBtn">Cancelar</button>
       <button class="btn-primary" id="saveBtn" style="--cat-color: var(--c-comida)">Guardar y continuar</button>
     </div>
   `;
   formArea.appendChild(card);
+  wireUnitsEditor(card);
 
   card.querySelector('#cancelBtn').addEventListener('click', openFoodForm);
   card.querySelector('#saveBtn').addEventListener('click', async () => {
     const name = card.querySelector('#nf_name').value.trim();
     if(!name){ showToast('Falta el nombre'); return; }
+    // si la porción se llama "100 g" (o "30 g"), su peso ya se sabe
+    const labelG = (card.querySelector('#nf_serving').value.trim().match(/^(\d+(?:[.,]\d+)?)\s*g$/i) || [])[1];
+    const servingG = Number(card.querySelector('#nf_serving_g').value) || (labelG ? Number(labelG.replace(',', '.')) : 0);
+    const units = readUnits(card);
+    if(units.length && !(servingG > 0)){ showToast('Las porciones caseras necesitan el peso de la porción'); return; }
     const fields = {
       name,
       category: card.querySelector('#nf_cat').value.trim() || null,
-      serving_label: card.querySelector('#nf_serving').value.trim() || '100 g'
+      serving_label: card.querySelector('#nf_serving').value.trim() || '100 g',
+      serving_grams: servingG > 0 ? servingG : null,
+      units,
+      micros: {}
     };
     NUTRIENT_FIELDS.forEach(f => {
       const v = card.querySelector(`[data-nutri="${f.key}"]`).value;
       fields[f.key] = v === '' ? null : Number(v);
+    });
+    MICRO_FIELDS.forEach(f => {
+      const v = card.querySelector(`[data-micro="${f.key}"]`).value;
+      if(v !== '') fields.micros[f.key] = Number(v);
     });
     const saveBtn = card.querySelector('#saveBtn');
     saveBtn.disabled = true; saveBtn.textContent = 'Guardando...';
@@ -985,11 +1278,168 @@ async function renderToday(){
     } else {
       wrap.innerHTML = `<div class="timeline">${list.map(entryRow).join('')}</div>`;
     }
-    renderRings(list.filter(e => e.kind === 'food'));
+    const foods = list.filter(e => e.kind === 'food');
+    todayFoodRows = foods.map(e => e.data);
+    renderRings(foods);
   }catch(err){
     wrap.innerHTML = `<div class="empty-state">Error cargando: ${escapeHtml(err.message)}</div>`;
+    todayFoodRows = [];
     renderRings([]);
   }
+  renderDaily();
+}
+
+/* ================= hoy: agua, electrolitos y suplementos ================= */
+
+const dailyCard = document.getElementById('dailyCard');
+// 1250 ml -> "1,25"
+function fmtLiters(ml){ return String(Math.round(ml / 10) / 100).replace('.', ','); }
+
+function renderDaily(){
+  if(!profile){ dailyCard.innerHTML = ''; return; }
+  const goal = goalsFor(todayStr()).goal_water_ml;
+  const ml = waterToday.reduce((s, w) => s + Number(w.ml), 0);
+  const el = electrolyteTotals(todayFoodRows, waterToday);
+  const hasEl = el.sodium_mg + el.potassium_mg + el.magnesium_mg > 0;
+  dailyCard.innerHTML = `
+    <div class="daily-card">
+      <button class="dc-water" id="waterOpenBtn" type="button" aria-label="Ver y editar el agua de hoy">
+        <span class="kh-top"><span class="kh-label">💧 Agua</span><span class="dc-num"><b>${fmtLiters(ml)}</b> / ${fmtLiters(goal)} L</span></span>
+        <span class="kh-bar dc-bar"><span class="kh-bar-fill" style="width:${pctWidth(ml, goal)}; background: var(--c-agua)"></span></span>
+      </button>
+      <div class="dc-btns">
+        <button class="chip" data-water="250" type="button">+250 ml</button>
+        <button class="chip" data-water="500" type="button">+500 ml</button>
+        <button class="chip" id="waterMoreBtn" type="button">Otro / suero</button>
+      </div>
+      ${hasEl ? `<div class="dc-elec">Sodio <b>${Math.round(el.sodium_mg)}</b> · Potasio <b>${Math.round(el.potassium_mg)}</b> · Magnesio <b>${Math.round(el.magnesium_mg)}</b> mg</div>` : ''}
+      <div class="dc-supps">
+        ${supplements.map(s => `<button class="chip supp-chip${takenToday.has(s.id) ? ' selected' : ''}" data-supp="${s.id}" type="button" aria-pressed="${takenToday.has(s.id)}">${takenToday.has(s.id) ? '✓ ' : ''}${escapeHtml(s.name)}</button>`).join('')}
+        <button class="chip supp-add" id="suppManageBtn" type="button">${supplements.length ? '⚙' : '＋ Suplementos'}</button>
+      </div>
+    </div>`;
+
+  dailyCard.querySelectorAll('[data-water]').forEach(b => b.addEventListener('click', async () => {
+    b.disabled = true;
+    try{
+      const row = await addWater(user.id, { date: todayStr(), time: nowStr(), ml: Number(b.dataset.water) });
+      waterToday.push(row);
+      showToast(`+${b.dataset.water} ml`);
+      renderDaily();
+    }catch(err){ showToast('Error: ' + err.message); b.disabled = false; }
+  }));
+  dailyCard.querySelector('#waterOpenBtn').addEventListener('click', openWaterForm);
+  dailyCard.querySelector('#waterMoreBtn').addEventListener('click', openWaterForm);
+  dailyCard.querySelector('#suppManageBtn').addEventListener('click', openSupplementsForm);
+  dailyCard.querySelectorAll('[data-supp]').forEach(b => b.addEventListener('click', async () => {
+    const id = b.dataset.supp;
+    const taken = !takenToday.has(id);
+    // se marca al instante; si falla, se deshace
+    taken ? takenToday.add(id) : takenToday.delete(id);
+    renderDaily();
+    try{ await setSupplementTaken(user.id, id, todayStr(), taken); }
+    catch(err){
+      taken ? takenToday.delete(id) : takenToday.add(id);
+      renderDaily();
+      showToast('Error: ' + err.message);
+    }
+  }));
+}
+
+function openWaterForm(){
+  resetForm();
+  const card = document.createElement('div');
+  card.className = 'form-card';
+  card.style.setProperty('--cat-color', 'var(--c-agua)');
+  const list = waterToday.slice().sort((a, b) => String(a.log_time).localeCompare(String(b.log_time)));
+  card.innerHTML = `
+    <h3><span>💧</span> Agua y electrolitos</h3>
+    ${list.length ? `<div class="combo-items">${list.map(w => `
+      <div class="combo-item"><span><span class="mono entry-time">${String(w.log_time).slice(0, 5)}</span> ${Math.round(w.ml)} ml${w.label ? ' · ' + escapeHtml(w.label) : ''}</span>
+        <button class="entry-del" data-del-water="${w.id}" type="button">eliminar</button></div>`).join('')}</div>` : ''}
+    <div class="field" style="margin-top:14px"><label>Cantidad (ml)</label>
+      <input type="number" id="w_ml" inputmode="numeric" min="1" step="any" placeholder="250"></div>
+    <div class="field"><label>Qué bebiste (opcional)</label><input type="text" id="w_label" placeholder="Ej: Suero oral, bebida deportiva"></div>
+    <p class="form-hint" style="margin-top:0">Si es un suero o bebida con electrolitos, copia lo que dice la etiqueta para esa cantidad. Si es agua, déjalo en blanco.</p>
+    <div class="row-3">
+      <div class="field"><label>Sodio (mg)</label><input type="number" id="w_na" inputmode="decimal" min="0" step="any" placeholder="opcional"></div>
+      <div class="field"><label>Potasio (mg)</label><input type="number" id="w_k" inputmode="decimal" min="0" step="any" placeholder="opcional"></div>
+      <div class="field"><label>Magnesio (mg)</label><input type="number" id="w_mg" inputmode="decimal" min="0" step="any" placeholder="opcional"></div>
+    </div>
+    <div class="form-actions">
+      <button class="btn-ghost" id="cancelBtn">Cerrar</button>
+      <button class="btn-primary" id="saveBtn">Agregar</button>
+    </div>`;
+  formArea.appendChild(card);
+  card.querySelector('#cancelBtn').addEventListener('click', closeForm);
+  card.querySelectorAll('[data-del-water]').forEach(b => b.addEventListener('click', async () => {
+    try{
+      await deleteWater(b.dataset.delWater);
+      waterToday = waterToday.filter(w => w.id !== b.dataset.delWater);
+      renderDaily();
+      openWaterForm();
+    }catch(err){ showToast('Error: ' + err.message); }
+  }));
+  card.querySelector('#saveBtn').addEventListener('click', async (ev) => {
+    const num = id => { const v = card.querySelector(id).value; return v === '' ? null : Number(v); };
+    const ml = num('#w_ml');
+    if(!(ml > 0)){ showToast('Escribe los mililitros'); return; }
+    ev.currentTarget.disabled = true;
+    try{
+      const row = await addWater(user.id, {
+        date: todayStr(), time: nowStr(), ml,
+        label: card.querySelector('#w_label').value.trim() || null,
+        sodium_mg: num('#w_na'), potassium_mg: num('#w_k'), magnesium_mg: num('#w_mg')
+      });
+      waterToday.push(row);
+      renderDaily();
+      closeForm();
+      showToast(`+${Math.round(ml)} ml`);
+    }catch(err){ showToast('Error: ' + err.message); ev.currentTarget.disabled = false; }
+  });
+}
+
+function openSupplementsForm(){
+  resetForm();
+  const card = document.createElement('div');
+  card.className = 'form-card';
+  card.style.setProperty('--cat-color', 'var(--c-supl)');
+  card.innerHTML = `
+    <h3><span>💊</span> Tu pila de suplementos</h3>
+    <p class="form-hint">Aparecen en Hoy como fichas: tócalas cuando los tomes.</p>
+    ${supplements.length ? `<div class="combo-items">${supplements.map(s => `
+      <div class="combo-item"><span>${escapeHtml(s.name)}${s.dose ? ` <span class="ci-dose">${escapeHtml(s.dose)}</span>` : ''}</span>
+        <button class="entry-del" data-retire="${s.id}" type="button">quitar</button></div>`).join('')}</div>` : ''}
+    <div class="row-2" style="margin-top:14px">
+      <div class="field"><label>Suplemento</label><input type="text" id="s_name" placeholder="Ej: Creatina"></div>
+      <div class="field"><label>Dosis (opcional)</label><input type="text" id="s_dose" placeholder="Ej: 5 g"></div>
+    </div>
+    <div class="form-actions">
+      <button class="btn-ghost" id="cancelBtn">Cerrar</button>
+      <button class="btn-primary" id="saveBtn">Agregar</button>
+    </div>`;
+  formArea.appendChild(card);
+  card.querySelector('#cancelBtn').addEventListener('click', closeForm);
+  card.querySelectorAll('[data-retire]').forEach(b => b.addEventListener('click', async () => {
+    try{
+      await retireSupplement(b.dataset.retire);
+      supplements = supplements.filter(s => s.id !== b.dataset.retire);
+      renderDaily();
+      openSupplementsForm();
+    }catch(err){ showToast('Error: ' + err.message); }
+  }));
+  card.querySelector('#saveBtn').addEventListener('click', async (ev) => {
+    const name = card.querySelector('#s_name').value.trim();
+    if(!name){ showToast('Escribe el nombre'); return; }
+    ev.currentTarget.disabled = true;
+    try{
+      const sort = supplements.reduce((m, s) => Math.max(m, s.sort || 0), 0) + 1;
+      supplements.push(await addSupplement(user.id, name, card.querySelector('#s_dose').value.trim(), sort));
+      renderDaily();
+      openSupplementsForm();
+      showToast(`${name} agregado`);
+    }catch(err){ showToast('Error: ' + err.message); ev.currentTarget.disabled = false; }
+  });
 }
 
 function renderHistoryPlaceholder(){
@@ -1008,9 +1458,13 @@ async function renderHistory(){
     wrap.innerHTML = dates.map(date => {
       const entries = byDate[date].sort((a,b) => a.time.localeCompare(b.time));
       const label = new Date(date + 'T12:00:00').toLocaleDateString('es-VE', { weekday:'short', day:'numeric', month:'short' });
+      // kcal del día contra la meta que valía ESE día (no la de hoy)
+      const foods = entries.filter(e => e.kind === 'food');
+      const kcal = foods.reduce((s, e) => s + (e.data.kcal != null ? Number(e.data.kcal) : 0), 0);
+      const kcalTxt = foods.length ? `${Math.round(kcal)}/${Math.round(goalsFor(date).goal_kcal)} kcal · ` : '';
       return `
         <details class="day-block">
-          <summary class="day-summary"><span class="d-date">${label}</span><span class="d-count mono">${entries.length} registro${entries.length===1?'':'s'}</span></summary>
+          <summary class="day-summary"><span class="d-date">${label}</span><span class="d-count mono">${kcalTxt}${entries.length} reg.</span></summary>
           <div class="day-body"><div class="timeline">${entries.map(entryRow).join('')}</div></div>
         </details>`;
     }).join('');
@@ -1069,20 +1523,21 @@ function renderRings(foodEntries){
     const d = e.data;
     ['kcal','protein_g','carbs_g','fat_g'].forEach(k => { if(d[k] != null) totals[k] += Number(d[k]); });
   });
-  const left = Math.max(0, Math.round(profile.goal_kcal - totals.kcal));
+  const g = goalsFor(todayStr());
+  const left = Math.max(0, Math.round(g.goal_kcal - totals.kcal));
   const macros = [
-    { key:'carbs_g', label:'Carbos', color:'var(--c-comida)', goal: profile.goal_carbs_g },
-    { key:'protein_g', label:'Proteína', color:'var(--c-gym)', goal: profile.goal_protein_g },
-    { key:'fat_g', label:'Grasa', color:'var(--c-sueno)', goal: profile.goal_fat_g }
+    { key:'carbs_g', label:'Carbos', color:'var(--c-comida)', goal: g.goal_carbs_g },
+    { key:'protein_g', label:'Proteína', color:'var(--c-gym)', goal: g.goal_protein_g },
+    { key:'fat_g', label:'Grasa', color:'var(--c-sueno)', goal: g.goal_fat_g }
   ];
 
   ringRow.innerHTML = `
     <div class="today-card">
       <div class="kh-top">
         <span class="kh-label">Calorías</span>
-        <span class="kh-num"><b>${Math.round(totals.kcal)}</b> / ${Math.round(profile.goal_kcal)} · ${left} restantes</span>
+        <span class="kh-num"><b>${Math.round(totals.kcal)}</b> / ${Math.round(g.goal_kcal)} · ${left} restantes</span>
       </div>
-      <div class="kh-bar"><div class="kh-bar-fill" style="width:${pctWidth(totals.kcal, profile.goal_kcal)}"></div></div>
+      <div class="kh-bar"><div class="kh-bar-fill" style="width:${pctWidth(totals.kcal, g.goal_kcal)}"></div></div>
       <div class="macro-row">
         ${macros.map(m => `
           <div class="macro-item">
@@ -1160,18 +1615,49 @@ async function renderInsight(entries){
   insightArea.innerHTML = text ? `<div class="insight-card">${text}</div>` : '';
 }
 
+// Si la app quedó abierta y pasó la medianoche, el agua y los suplementos son de otro día
+let dailyFor = todayStr();
+async function reloadDailyIfNewDay(){
+  const today = todayStr();
+  if(dailyFor === today) return false;
+  dailyFor = today;
+  try{
+    [waterToday, takenToday] = await Promise.all([getWaterLogs(user.id, today), getSupplementLogs(user.id, today)]);
+  }catch(err){ waterToday = []; takenToday = new Set(); }
+  return true;
+}
+document.addEventListener('visibilitychange', async () => {
+  if(document.visibilityState === 'visible' && user && await reloadDailyIfNewDay()) await renderToday();
+});
+
 async function refreshAfterLog(){
   try{ profile = await getMyProfile(user.id); }catch(err){}
+  await reloadDailyIfNewDay();
   await Promise.all([renderToday(), renderStats(), renderFavorites()]);
 }
 
 /* ================= perfil / metas ================= */
 
-function fillGoalInputs(){
-  document.getElementById('goalKcal').value = Math.round(profile.goal_kcal);
-  document.getElementById('goalProtein').value = Math.round(profile.goal_protein_g);
-  document.getElementById('goalCarbs').value = Math.round(profile.goal_carbs_g);
-  document.getElementById('goalFat').value = Math.round(profile.goal_fat_g);
+function fillGoalInputs(g = goalsFor(todayStr())){
+  document.getElementById('goalKcal').value = Math.round(g.goal_kcal);
+  document.getElementById('goalProtein').value = Math.round(g.goal_protein_g);
+  document.getElementById('goalCarbs').value = Math.round(g.goal_carbs_g);
+  document.getElementById('goalFat').value = Math.round(g.goal_fat_g);
+  document.getElementById('goalWater').value = Math.round(g.goal_water_ml);
+}
+
+/** Guarda las metas en el perfil y en el historial (valen desde hoy). */
+async function saveGoals(goals){
+  await updateGoals(user.id, goals);
+  profile = { ...profile, ...goals };
+  try{
+    await saveGoalsFrom(user.id, todayStr(), goals);
+    goalHistory = await getGoalHistory(user.id);
+  }catch(err){
+    // sin la tabla de la fase 2 las metas igual quedan en el perfil
+    console.warn('historial de metas:', err.message || err);
+  }
+  await renderToday();
 }
 
 document.getElementById('saveGoalsBtn').addEventListener('click', async () => {
@@ -1179,17 +1665,125 @@ document.getElementById('saveGoalsBtn').addEventListener('click', async () => {
     goal_kcal: Number(document.getElementById('goalKcal').value),
     goal_protein_g: Number(document.getElementById('goalProtein').value),
     goal_carbs_g: Number(document.getElementById('goalCarbs').value),
-    goal_fat_g: Number(document.getElementById('goalFat').value)
+    goal_fat_g: Number(document.getElementById('goalFat').value),
+    goal_water_ml: Number(document.getElementById('goalWater').value)
   };
   if(Object.values(goals).some(v => !Number.isFinite(v) || v <= 0)){
     showToast('Todas las metas deben ser mayores a 0');
     return;
   }
   try{
-    await updateGoals(user.id, goals);
-    profile = { ...profile, ...goals };
-    await renderToday();
-    showToast('Metas guardadas');
+    await saveGoals(goals);
+    showToast('Metas guardadas desde hoy');
+  }catch(err){ showToast('Error: ' + err.message); }
+});
+
+/* ================= perfil físico y metas sugeridas ================= */
+
+function latestWeight(){ return weights.length ? Number(weights[0].weight_kg) : null; }
+
+function fillBodyInputs(){
+  const b = bodyProfile || {};
+  document.getElementById('bodySex').value = b.sex || '';
+  document.getElementById('bodyAge').value = b.birth_year ? new Date().getFullYear() - b.birth_year : '';
+  document.getElementById('bodyHeight').value = b.height_cm || '';
+  document.getElementById('bodyObjective').value = b.objective || 'mantener';
+  document.getElementById('bodyTraining').value = String(b.training_days ?? 3);
+  renderSuggestion();
+}
+
+function readBodyInputs(){
+  const age = Number(document.getElementById('bodyAge').value);
+  return {
+    sex: document.getElementById('bodySex').value || null,
+    birth_year: age > 0 ? new Date().getFullYear() - age : null,
+    height_cm: Number(document.getElementById('bodyHeight').value) || null,
+    objective: document.getElementById('bodyObjective').value,
+    training_days: Number(document.getElementById('bodyTraining').value)
+  };
+}
+
+let lastSuggestion = null;
+function renderSuggestion(){
+  const box = document.getElementById('goalSuggestion');
+  const btn = document.getElementById('applySuggestionBtn');
+  const kg = latestWeight();
+  const s = suggestGoals(readBodyInputs(), kg);
+  lastSuggestion = s;
+  btn.classList.toggle('hidden', !s);
+  if(!s){
+    box.innerHTML = kg ? 'Completa sexo, edad y altura para calcular tus metas.' : 'Registra tu peso (abajo) y completa tus datos para calcular tus metas.';
+    return;
+  }
+  const g = s.goals;
+  box.innerHTML = `Gasto en reposo <b>${s.bmr}</b> kcal · gasto diario <b>${s.tdee}</b> kcal (con ${kg} kg)<br>
+    Meta sugerida: <b>${g.goal_kcal}</b> kcal · proteína <b>${g.goal_protein_g}</b> g · carbos <b>${g.goal_carbs_g}</b> g · grasa <b>${g.goal_fat_g}</b> g · agua <b>${fmtLiters(g.goal_water_ml)}</b> L`;
+}
+['bodySex','bodyAge','bodyHeight','bodyObjective','bodyTraining'].forEach(id => {
+  document.getElementById(id).addEventListener('input', renderSuggestion);
+});
+
+document.getElementById('saveBodyBtn').addEventListener('click', async () => {
+  const fields = readBodyInputs();
+  if(fields.height_cm && (fields.height_cm < 100 || fields.height_cm > 250)){ showToast('La altura va en cm (100–250)'); return; }
+  try{
+    bodyProfile = await saveBodyProfile(user.id, fields);
+    showToast('Perfil físico guardado');
+  }catch(err){ showToast('Error: ' + err.message); }
+});
+
+document.getElementById('applySuggestionBtn').addEventListener('click', async () => {
+  if(!lastSuggestion) return;
+  try{
+    bodyProfile = await saveBodyProfile(user.id, readBodyInputs());
+    await saveGoals(lastSuggestion.goals);
+    fillGoalInputs(lastSuggestion.goals);
+    showToast('Metas actualizadas desde hoy');
+  }catch(err){ showToast('Error: ' + err.message); }
+});
+
+/* ================= peso corporal ================= */
+
+function renderWeights(){
+  const wrap = document.getElementById('weightList');
+  if(!weights.length){ wrap.innerHTML = `<div class="search-empty">Todavía no hay pesos registrados.</div>`; return; }
+  const asc = weights.slice(0, 60).reverse();   // del más viejo al más nuevo
+  let chart = '';
+  if(asc.length >= 2){
+    // gráfica mínima en SVG: x = posición en la lista, y = peso
+    const vals = asc.map(w => Number(w.weight_kg));
+    const min = Math.min(...vals), max = Math.max(...vals), span = Math.max(max - min, 0.5);
+    const W = 300, H = 70, pad = 6;
+    const pts = vals.map((v, i) => `${(pad + (i * (W - 2 * pad)) / (vals.length - 1)).toFixed(1)},${(H - pad - ((v - min) / span) * (H - 2 * pad)).toFixed(1)}`).join(' ');
+    const diff = vals[vals.length - 1] - vals[0];
+    chart = `<svg class="weight-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Gráfica de peso">
+        <polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+      </svg>
+      <div class="weight-diff">${diff > 0 ? '+' : ''}${diff.toFixed(1).replace('.', ',')} kg desde el ${new Date(asc[0].log_date + 'T12:00:00').toLocaleDateString('es-VE', { day:'numeric', month:'short' })}</div>`;
+  }
+  wrap.innerHTML = chart + `<div class="combo-items">${weights.slice(0, 7).map(w => `
+    <div class="combo-item"><span><span class="mono entry-time">${new Date(w.log_date + 'T12:00:00').toLocaleDateString('es-VE', { weekday:'short', day:'numeric', month:'short' })}</span> ${String(Number(w.weight_kg)).replace('.', ',')} kg</span>
+      <button class="entry-del" data-del-weight="${w.id}" type="button">eliminar</button></div>`).join('')}</div>`;
+  wrap.querySelectorAll('[data-del-weight]').forEach(b => b.addEventListener('click', async () => {
+    try{
+      await deleteWeight(b.dataset.delWeight);
+      weights = weights.filter(w => w.id !== b.dataset.delWeight);
+      renderWeights();
+      renderSuggestion();
+    }catch(err){ showToast('Error: ' + err.message); }
+  }));
+}
+
+document.getElementById('saveWeightBtn').addEventListener('click', async () => {
+  const kg = Number(String(document.getElementById('weightInput').value).replace(',', '.'));
+  if(!(kg > 20 && kg < 400)){ showToast('Escribe tu peso en kg'); return; }
+  try{
+    const row = await saveWeight(user.id, todayStr(), kg);
+    weights = [row, ...weights.filter(w => w.log_date !== row.log_date)];
+    document.getElementById('weightInput').value = '';
+    renderWeights();
+    renderSuggestion();
+    showToast('Peso guardado');
   }catch(err){ showToast('Error: ' + err.message); }
 });
 
@@ -1210,8 +1804,17 @@ document.getElementById('reportBtn').addEventListener('click', async () => {
   const to = todayStr();
   const from = range === 'week' ? daysAgoStr(6) : to;
   try{
-    const entries = await getEntriesInRange(user.id, from, to);
-    const text = buildReportText({ displayName: profile.display_name, fromDate: from, toDate: to, entries, profile });
+    const [entries, water, suppLogs, allSupps] = await Promise.all([
+      getEntriesInRange(user.id, from, to),
+      getWaterLogs(user.id, from, to).catch(() => []),
+      getSupplementLogsInRange(user.id, from, to).catch(() => []),
+      getSupplements(user.id, true).catch(() => [])
+    ]);
+    const suppNames = new Map(allSupps.map(s => [s.id, s.name + (s.dose ? ' ' + s.dose : '')]));
+    const text = buildReportText({
+      displayName: profile.display_name, fromDate: from, toDate: to, entries, goalsFor,
+      water, suppLogs, suppNames, weights: weights.filter(w => w.log_date >= from && w.log_date <= to)
+    });
     downloadText(`asclepio-${profile.display_name}-${to}.txt`, text);
   }catch(err){ showToast('Error generando reporte: ' + err.message); }
 });
