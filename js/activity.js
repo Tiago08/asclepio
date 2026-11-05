@@ -1,4 +1,4 @@
-import { supabase } from './supabaseClient.js?v=16';
+import { supabase } from './supabaseClient.js?v=17';
 
 export async function logActivity({ userId, type, date, time, data }) {
   const { data: row, error } = await supabase

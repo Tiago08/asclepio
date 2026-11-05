@@ -1,21 +1,48 @@
-import { supabase } from './supabaseClient.js?v=16';
+import { supabase } from './supabaseClient.js?v=17';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js?v=16';
+} from './auth.js?v=17';
 import {
   NUTRIENT_FIELDS, MICRO_FIELDS, searchUsda, searchLocalFoods, searchFavorites, updateFood,
   cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, moveFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel, pluralEs
-} from './foods.js?v=16';
-import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=16';
-import { buildReportText, downloadText } from './report.js?v=16';
-import { BASICS, searchBasics } from './basics.js?v=16';
+} from './foods.js?v=17';
+import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=17';
+import { buildReportText, downloadText } from './report.js?v=17';
+import { BASICS, searchBasics } from './basics.js?v=17';
 import {
   getGoalHistory, saveGoalsFrom, goalsForDate, getBodyProfile, saveBodyProfile, suggestGoals, PACES, paceOf, objectiveOf,
   getWeights, saveWeight, deleteWeight, getSupplements, addSupplement, retireSupplement,
   getSupplementLogs, getSupplementLogsInRange, setSupplementTaken, getWaterLogs, addWater, deleteWater,
   electrolyteTotals, getCombos, createCombo, deleteCombo
-} from './health.js?v=16';
+} from './health.js?v=17';
+
+/* ================= actualización automática ================= */
+/* GitHub Pages deja guardar index.html hasta 10 min y la app instalada en el
+   iPhone lo guarda aún más: aunque subamos ?v=N, el index viejo sigue pidiendo
+   los archivos viejos. Al abrir la app (y al volver a ella) se mira el index
+   publicado SIN caché; si pide una versión distinta a la que corre, se recarga.
+   Como un watchdog: compara la versión "en ROM" con la publicada. */
+
+const APP_VERSION = new URL(import.meta.url).searchParams.get('v');
+
+async function checkForUpdate(){
+  if(!APP_VERSION || !navigator.onLine) return;
+  try{
+    // la misma URL con la que se abrió la app (en el iPhone suele ser /asclepio/,
+    // no /asclepio/index.html): cache: 'reload' deja ESA copia al día para la recarga
+    const res = await fetch(location.href.split('#')[0], { cache: 'reload' });
+    if(!res.ok) return;
+    const live = (await res.text()).match(/app\.js\?v=(\d+)/)?.[1];
+    if(!live || live === APP_VERSION) return;
+    // una sola recarga por versión, para no quedar en bucle si algo falla
+    const key = 'asclepio_reloaded_for';
+    try{ if(sessionStorage.getItem(key) === live) return; sessionStorage.setItem(key, live); }catch(e){ /* sigue */ }
+    location.reload();
+  }catch(e){ /* sin red: se queda la versión actual */ }
+}
+checkForUpdate();
+document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') checkForUpdate(); });
 
 /* ================= utilidades de hora ================= */
 
@@ -1341,8 +1368,10 @@ function renderMeals(foods){
         </div>
         ${items.length ? `<div class="meal-items">${items.map(e => `
           <div class="meal-item">
-            <button class="mi-name" data-move-food="${e.id}" type="button" aria-label="Mover ${escapeHtml(foodLogLabel(e.data))} a otra comida">${escapeHtml(foodLogLabel(e.data))}</button>
-            <span class="mi-kcal mono">${e.data.kcal != null ? Math.round(e.data.kcal) : '–'}</span>
+            <button class="mi-main" data-move-food="${e.id}" type="button" aria-label="Mover ${escapeHtml(foodLogLabel(e.data))} a otra comida">
+              <span class="mi-name">${escapeHtml(foodLogLabel(e.data))}</span>
+              <span class="mi-kcal mono">${e.data.kcal != null ? Math.round(e.data.kcal) : '–'}</span>
+            </button>
             <button class="mi-del" data-del-food="${e.id}" type="button" aria-label="Eliminar ${escapeHtml(foodLogLabel(e.data))}">×</button>
           </div>`).join('')}</div>` : ''}
       </div>`;

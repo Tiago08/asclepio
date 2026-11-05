@@ -547,11 +547,14 @@ header{
 .meal-add:active{ background: var(--c-comida); color: #0e1115; }
 .meal-items{ padding: 0 0 8px; }
 .meal-item{ display: flex; align-items: center; gap: 8px; font-size: 13.5px; padding: 2px 0; }
-.mi-name{
-  flex: 1; min-width: 0; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  background: none; border: none; padding: 8px 0; text-align: left; font: inherit; border-radius: 6px;
+/* toda la fila (nombre y kcal) abre "Mover a otra comida"; la × va aparte */
+.mi-main{
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 40px;
+  background: none; border: none; padding: 4px 6px; margin-left: -6px; text-align: left; font: inherit; color: inherit;
+  border-radius: 8px; transition: background 120ms ease;
 }
-.mi-name:active{ color: var(--text); }
+.mi-main:active{ background: var(--surface-sunken); }
+.mi-name{ flex: 1; min-width: 0; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .move-food-name{ font-size: 14px; color: var(--text-dim); margin: -4px 0 14px; }
 .check-row.is-current{ opacity: 0.55; }
 .move-here{ margin-left: auto; font-size: 12px; color: var(--text-faint); }
