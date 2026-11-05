@@ -1,6 +1,6 @@
-import { supabase } from './supabaseClient.js?v=10';
-import { USDA_API_KEY } from './config.js?v=10';
-import { dictQueryToEnglish, normalizeText } from './foodDict.js?v=10';
+import { supabase } from './supabaseClient.js?v=11';
+import { USDA_API_KEY } from './config.js?v=11';
+import { dictQueryToEnglish, normalizeText } from './foodDict.js?v=11';
 
 // Campos nutricionales que manejamos en toda la app, en el orden
 // en que se muestran. Un solo lugar para no desincronizar listas.

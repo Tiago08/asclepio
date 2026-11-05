@@ -1,21 +1,21 @@
-import { supabase } from './supabaseClient.js?v=10';
+import { supabase } from './supabaseClient.js?v=11';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js?v=10';
+} from './auth.js?v=11';
 import {
   NUTRIENT_FIELDS, MICRO_FIELDS, searchUsda, searchLocalFoods, searchFavorites, updateFood,
   cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel
-} from './foods.js?v=10';
-import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=10';
-import { buildReportText, downloadText } from './report.js?v=10';
-import { BASICS, searchBasics } from './basics.js?v=10';
+} from './foods.js?v=11';
+import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=11';
+import { buildReportText, downloadText } from './report.js?v=11';
+import { BASICS, searchBasics } from './basics.js?v=11';
 import {
   getGoalHistory, saveGoalsFrom, goalsForDate, getBodyProfile, saveBodyProfile, suggestGoals,
   getWeights, saveWeight, deleteWeight, getSupplements, addSupplement, retireSupplement,
   getSupplementLogs, getSupplementLogsInRange, setSupplementTaken, getWaterLogs, addWater, deleteWater,
   electrolyteTotals, getCombos, createCombo, deleteCombo
-} from './health.js?v=10';
+} from './health.js?v=11';
 
 /* ================= utilidades de hora ================= */
 
@@ -1240,7 +1240,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
-    appShell.scrollTo({ top: 0 });
+    window.scrollTo({ top: 0 });
     if(btn.dataset.tab === 'historial') await renderHistory();
     if(btn.dataset.tab === 'ranking') await renderRanking();
   });
@@ -1294,6 +1294,7 @@ async function renderToday(){
 const dailyCard = document.getElementById('dailyCard');
 // 1250 ml -> "1,25"
 function fmtLiters(ml){ return String(Math.round(ml / 10) / 100).replace('.', ','); }
+let waterEditOpen = false;   // fila de "quitar" del agua, visible solo al tocar la barra
 
 function renderDaily(){
   if(!profile){ dailyCard.innerHTML = ''; return; }
@@ -1301,9 +1302,12 @@ function renderDaily(){
   const ml = waterToday.reduce((s, w) => s + Number(w.ml), 0);
   const el = electrolyteTotals(todayFoodRows, waterToday);
   const hasEl = el.sodium_mg + el.potassium_mg + el.magnesium_mg > 0;
+  // el último vaso (por hora y, si empatan, por orden de registro)
+  const last = waterToday.length ? waterToday.reduce((a, b) => (String(b.log_time) >= String(a.log_time) ? b : a)) : null;
+  if(!last) waterEditOpen = false;
   dailyCard.innerHTML = `
     <div class="daily-card">
-      <button class="dc-water" id="waterOpenBtn" type="button" aria-label="Ver y editar el agua de hoy">
+      <button class="dc-water" id="waterOpenBtn" type="button" aria-expanded="${waterEditOpen}" aria-label="Agua de hoy: toca para quitar">
         <span class="kh-top"><span class="kh-label">💧 Agua</span><span class="dc-num"><b>${fmtLiters(ml)}</b> / ${fmtLiters(goal)} L</span></span>
         <span class="kh-bar dc-bar"><span class="kh-bar-fill" style="width:${pctWidth(ml, goal)}; background: var(--c-agua)"></span></span>
       </button>
@@ -1312,6 +1316,11 @@ function renderDaily(){
         <button class="chip" data-water="500" type="button">+500 ml</button>
         <button class="chip" id="waterMoreBtn" type="button">Otro / suero</button>
       </div>
+      ${waterEditOpen && last ? `
+      <div class="dc-btns dc-remove">
+        <button class="chip chip-remove" id="waterUndoBtn" type="button">− Quitar el último (${Math.round(last.ml)} ml)</button>
+        <button class="chip" id="waterListBtn" type="button">Ver todos</button>
+      </div>` : ''}
       ${hasEl ? `<div class="dc-elec">Sodio <b>${Math.round(el.sodium_mg)}</b> · Potasio <b>${Math.round(el.potassium_mg)}</b> · Magnesio <b>${Math.round(el.magnesium_mg)}</b> mg</div>` : ''}
       <div class="dc-supps">
         ${supplements.map(s => `<button class="chip supp-chip${takenToday.has(s.id) ? ' selected' : ''}" data-supp="${s.id}" type="button" aria-pressed="${takenToday.has(s.id)}">${takenToday.has(s.id) ? '✓ ' : ''}${escapeHtml(s.name)}</button>`).join('')}
@@ -1328,8 +1337,25 @@ function renderDaily(){
       renderDaily();
     }catch(err){ showToast('Error: ' + err.message); b.disabled = false; }
   }));
-  dailyCard.querySelector('#waterOpenBtn').addEventListener('click', openWaterForm);
+  // tocar la barra muestra u oculta la opción de quitar
+  dailyCard.querySelector('#waterOpenBtn').addEventListener('click', () => {
+    if(!waterToday.length){ showToast('Todavía no hay agua hoy'); return; }
+    waterEditOpen = !waterEditOpen;
+    renderDaily();
+  });
   dailyCard.querySelector('#waterMoreBtn').addEventListener('click', openWaterForm);
+  if(waterEditOpen && last){
+    dailyCard.querySelector('#waterListBtn').addEventListener('click', () => { waterEditOpen = false; renderDaily(); openWaterForm(); });
+    dailyCard.querySelector('#waterUndoBtn').addEventListener('click', async (ev) => {
+      ev.currentTarget.disabled = true;
+      try{
+        await deleteWater(last.id);
+        waterToday = waterToday.filter(w => w.id !== last.id);
+        showToast(`−${Math.round(last.ml)} ml`);
+      }catch(err){ showToast('Error: ' + err.message); }
+      renderDaily();
+    });
+  }
   dailyCard.querySelector('#suppManageBtn').addEventListener('click', openSupplementsForm);
   dailyCard.querySelectorAll('[data-supp]').forEach(b => b.addEventListener('click', async () => {
     const id = b.dataset.supp;
