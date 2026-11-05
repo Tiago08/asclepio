@@ -1,6 +1,6 @@
 // Fase 2: metas por día, perfil físico, peso, suplementos, agua y combos.
 // Solo acceso a datos y cálculos; las pantallas están en app.js.
-import { supabase } from './supabaseClient.js?v=14';
+import { supabase } from './supabaseClient.js?v=15';
 
 function must({ data, error }) {
   if (error) throw error;

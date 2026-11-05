@@ -1,21 +1,21 @@
-import { supabase } from './supabaseClient.js?v=14';
+import { supabase } from './supabaseClient.js?v=15';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js?v=14';
+} from './auth.js?v=15';
 import {
   NUTRIENT_FIELDS, MICRO_FIELDS, searchUsda, searchLocalFoods, searchFavorites, updateFood,
   cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel, pluralEs
-} from './foods.js?v=14';
-import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=14';
-import { buildReportText, downloadText } from './report.js?v=14';
-import { BASICS, searchBasics } from './basics.js?v=14';
+} from './foods.js?v=15';
+import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=15';
+import { buildReportText, downloadText } from './report.js?v=15';
+import { BASICS, searchBasics } from './basics.js?v=15';
 import {
   getGoalHistory, saveGoalsFrom, goalsForDate, getBodyProfile, saveBodyProfile, suggestGoals, PACES, paceOf, objectiveOf,
   getWeights, saveWeight, deleteWeight, getSupplements, addSupplement, retireSupplement,
   getSupplementLogs, getSupplementLogsInRange, setSupplementTaken, getWaterLogs, addWater, deleteWater,
   electrolyteTotals, getCombos, createCombo, deleteCombo
-} from './health.js?v=14';
+} from './health.js?v=15';
 
 /* ================= utilidades de hora ================= */
 
@@ -144,7 +144,11 @@ const TYPES = {
       { key:'extras', label:'Además', type:'chips', multi:true, options:['Hinchazón'] },
       { key:'nota', label:'Nota (opcional)', type:'text', placeholder:'' }
     ],
+    base: { fue: true },
+    // como "día de descanso" en Gym: un toque y queda registrado que hoy no fuiste
+    restAction: { label:'Hoy no fui al baño', data:{ fue:false } },
     summary: d => {
+      if(d.fue === false) return 'No fui hoy';
       const parts = [];
       if(d.tipo) parts.push(d.tipo);
       if(Array.isArray(d.extras) && d.extras.length) parts.push(d.extras.join(', '));
@@ -1415,7 +1419,27 @@ function renderDaily(){
   }
   const sleep = tileHtml({ id: 'tileSleep', color: 'var(--c-sueno)', icon: '🌙', label: 'Sueño', value: sleepV, sub: sleepSub, done: !!s });
 
-  dayTiles.innerHTML = water + supp + gym + sleep;
+  // baño y energía: mosaicos bajitos de una línea, para no cargar la pantalla
+  const banos = todayEntries.filter(e => e.kind === 'activity' && e.type === 'bano');
+  const fueron = banos.filter(e => e.data.fue !== false);
+  let banoV = '¿fuiste?';
+  if(fueron.length){
+    const ult = fueron[fueron.length - 1].data.tipo;
+    banoV = (fueron.length > 1 ? `${fueron.length}× ` : '') + (ult ? ult.replace(/\s*\(.*\)$/, '') : 'Listo');
+  }else if(banos.length) banoV = 'No fui';
+  const energias = todayEntries.filter(e => e.kind === 'activity' && e.type === 'energia' && e.data.nivel);
+  const energiaV = energias.length ? `${energias[energias.length - 1].data.nivel}/5` : '¿cómo vas?';
+  const mini = (id, color, icon, label, value, done) => `
+    <div class="tile is-mini${done ? ' is-done' : ''}" style="--cat-color:${color}">
+      <button class="tile-main" id="${id}" type="button">
+        <span class="tile-h"><span class="tile-ic" aria-hidden="true">${icon}</span>${label}</span>
+        <span class="tile-mini-v${done ? '' : ' tile-empty'}">${escapeHtml(value)}</span>
+      </button>
+    </div>`;
+  const bano = mini('tileBano', 'var(--c-bano)', '🚽', 'Baño', banoV, banos.length > 0);
+  const energia = mini('tileEnergia', 'var(--c-energia)', '⚡', 'Energía', energiaV, energias.length > 0);
+
+  dayTiles.innerHTML = water + supp + gym + sleep + bano + energia;
 
   dayTiles.querySelector('#tileWater').addEventListener('click', openWaterForm);
   dayTiles.querySelector('#waterPlusBtn').addEventListener('click', async (ev) => {
@@ -1427,6 +1451,8 @@ function renderDaily(){
   dayTiles.querySelector('#tileSupps').addEventListener('click', openSupplementsForm);
   dayTiles.querySelector('#tileGym').addEventListener('click', () => openActivityForm('gym'));
   dayTiles.querySelector('#tileSleep').addEventListener('click', () => openActivityForm('sueno'));
+  dayTiles.querySelector('#tileBano').addEventListener('click', () => openActivityForm('bano'));
+  dayTiles.querySelector('#tileEnergia').addEventListener('click', () => openActivityForm('energia'));
 }
 
 /* ---- registrar: comida (lo más frecuente) y el resto en pastillas ---- */
@@ -1669,23 +1695,69 @@ document.addEventListener('click', async (e) => {
 
 /* ================= ranking ================= */
 
+// Lo mismo que calc_day_points en sql/puntos.sql: si cambias uno, cambia el otro.
+const POINTS_INFO = [
+  ['🍽️', 'Comida', '2 · +1 con 3 comidas o más'],
+  ['🌙', 'Sueño', '2'],
+  ['🏋️', 'Gym o descanso', '2'],
+  ['⚡', 'Energía', '1'],
+  ['🚽', 'Baño (también "no fui")', '1'],
+  ['💧', 'Agua', '1'],
+  ['💊', 'Suplementos', '1']
+];
+let rankingMode = 'week';   // 'week' = esta semana (desde el lunes) | 'total'
+
+/** Lunes de esta semana, "AAAA-MM-DD". */
+function weekStartStr(){
+  const dow = (new Date().getDay() + 6) % 7;   // lunes = 0 ... domingo = 6
+  return daysAgoStr(dow);
+}
+
 async function renderRanking(){
   const wrap = document.getElementById('rankingList');
   wrap.innerHTML = `<div class="search-empty"><span class="spinner"></span> cargando...</div>`;
   try{
-    const rows = await getRanking();
+    const rows = await getRanking(weekStartStr());
     if(rows.length === 0){ wrap.innerHTML = `<div class="empty-state">Nadie ha registrado nada todavía.</div>`; return; }
-    wrap.innerHTML = rows.map((r, i) => `
+    const hasPoints = rows.some(r => r.points_week != null);
+    const key = rankingMode === 'week' ? 'points_week' : 'points_total';
+    // con puntos: gana quien más puntos tiene; empate -> la racha más larga
+    rows.sort((a, b) => hasPoints
+      ? (b[key] - a[key]) || (b.streak_current - a.streak_current)
+      : (b.streak_current - a.streak_current));
+
+    const modes = hasPoints ? `
+      <div class="chip-row rank-modes">
+        <button type="button" class="chip${rankingMode === 'week' ? ' selected' : ''}" data-rank-mode="week">Esta semana</button>
+        <button type="button" class="chip${rankingMode === 'total' ? ' selected' : ''}" data-rank-mode="total">Total</button>
+      </div>` : '';
+    const list = rows.map((r, i) => `
       <div class="rank-row ${r.id === user.id ? 'me' : ''}">
         <div class="rank-left">
           <span class="rank-pos mono">${i+1}</span>
-          <span class="rank-name">${escapeHtml(r.display_name)}${r.id === user.id ? ' (tú)' : ''}</span>
+          <div>
+            <div class="rank-name">${escapeHtml(r.display_name)}${r.id === user.id ? ' (tú)' : ''}</div>
+            ${hasPoints ? `<div class="rank-best">🔥 ${r.streak_current}d de racha · mejor ${r.streak_best}d</div>` : ''}
+          </div>
         </div>
         <div style="text-align:right;">
-          <div class="rank-streak">${r.streak_current}d</div>
-          <div class="rank-best">mejor: ${r.streak_best}d</div>
+          ${hasPoints
+            ? `<div class="rank-points">${r[key]} <small>pts</small></div>`
+            : `<div class="rank-streak">${r.streak_current}d</div><div class="rank-best">mejor: ${r.streak_best}d</div>`}
         </div>
       </div>`).join('');
+    const info = hasPoints ? `
+      <details class="more-fields rank-info">
+        <summary>¿Cómo se ganan puntos?</summary>
+        <p>Cada cosa cuenta una vez al día. Máximo 11 puntos por día.</p>
+        <div class="rank-info-list">${POINTS_INFO.map(([ic, label, pts]) => `
+          <div><span aria-hidden="true">${ic}</span> ${label}<span class="mono">${pts}</span></div>`).join('')}</div>
+      </details>` : '';
+    wrap.innerHTML = modes + list + info;
+    wrap.querySelectorAll('[data-rank-mode]').forEach(b => b.addEventListener('click', () => {
+      rankingMode = b.dataset.rankMode;
+      renderRanking();
+    }));
   }catch(err){
     wrap.innerHTML = `<div class="empty-state">Error: ${escapeHtml(err.message)}</div>`;
   }

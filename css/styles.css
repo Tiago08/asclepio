@@ -446,6 +446,13 @@ header{
 }
 .tile-plus:active{ transform: scale(0.92); }
 .tile-plus:disabled{ opacity: 0.6; }
+/* baño y energía: una sola línea, más bajitos que los cuatro de arriba */
+.tile.is-mini .tile-main{
+  flex-direction: row; align-items: center; justify-content: space-between; gap: 8px;
+  min-height: 48px; padding: 10px 14px;
+}
+.tile-mini-v{ font-size: 13.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tile-mini-v.tile-empty{ font-size: 13px; }
 
 /* ---------- hoy: registrar ---------- */
 .log-area{ margin-bottom: 18px; }
@@ -596,3 +603,12 @@ header{
 .gr-now{ margin-top: 10px; font-size: 12px; color: var(--text-faint); }
 .manual-goals{ margin: 0 0 8px; }
 .manual-goals p{ margin: 4px 0 12px; }
+
+/* ---------- ranking: puntos ---------- */
+.rank-modes{ margin-bottom: 12px; }
+.rank-points{ font-family: 'IBM Plex Mono', monospace; font-size: 18px; color: var(--accent); }
+.rank-points small{ font-size: 11px; color: var(--text-faint); }
+.rank-info p{ font-size: 12.5px; color: var(--text-dim); margin: 2px 0 8px; }
+.rank-info-list{ display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-dim); }
+.rank-info-list > div{ display: flex; gap: 8px; align-items: baseline; }
+.rank-info-list .mono{ margin-left: auto; color: var(--text); font-size: 12px; text-align: right; }

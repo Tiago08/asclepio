@@ -1,4 +1,4 @@
-import { supabase } from './supabaseClient.js?v=14';
+import { supabase } from './supabaseClient.js?v=15';
 
 export async function logActivity({ userId, type, date, time, data }) {
   const { data: row, error } = await supabase
@@ -45,11 +45,29 @@ function mergeEntries(activity, foods) {
   return [...a, ...f].sort((x, y) => (x.date + x.time).localeCompare(y.date + y.time));
 }
 
-export async function getRanking() {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('id, display_name, streak_current, streak_best')
-    .order('streak_current', { ascending: false });
+/**
+ * Ranking: nombre y racha de cada perfil, más sus puntos de la semana
+ * (desde weekStart) y totales. Si aún no se corrió sql/puntos.sql, la
+ * tabla no existe: se devuelve el ranking solo con rachas (points = null).
+ */
+export async function getRanking(weekStart) {
+  const [{ data, error }, pts] = await Promise.all([
+    supabase.from('profiles').select('id, display_name, streak_current, streak_best'),
+    // lo más reciente primero: si algún día pasa del tope de filas de Supabase
+    // (1000), lo que se pierde es lo más viejo, nunca la semana actual
+    supabase.from('daily_points').select('user_id, log_date, points').order('log_date', { ascending: false })
+  ]);
   if (error) throw error;
-  return data || [];
+  const hasPoints = !pts.error;
+  if (pts.error) console.warn('Sin puntos (¿falta correr sql/puntos.sql?):', pts.error.message);
+  const week = new Map(), total = new Map();
+  (pts.data || []).forEach(r => {
+    total.set(r.user_id, (total.get(r.user_id) || 0) + r.points);
+    if (r.log_date >= weekStart) week.set(r.user_id, (week.get(r.user_id) || 0) + r.points);
+  });
+  return (data || []).map(p => ({
+    ...p,
+    points_week: hasPoints ? (week.get(p.id) || 0) : null,
+    points_total: hasPoints ? (total.get(p.id) || 0) : null
+  }));
 }

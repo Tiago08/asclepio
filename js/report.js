@@ -1,4 +1,4 @@
-import { NUTRIENT_FIELDS, MICRO_FIELDS, foodLogLabel } from './foods.js?v=14';
+import { NUTRIENT_FIELDS, MICRO_FIELDS, foodLogLabel } from './foods.js?v=15';
 
 function fmtNum(v){
   if(v === null || v === undefined) return '—';
@@ -44,6 +44,7 @@ export function buildReportText({ displayName, fromDate, toDate, entries, goalsF
         lines.push(`- [${e.time}] Gym: ${d.fue === false ? 'día de descanso' : `${tipos}${d.duracion ? ' (' + d.duracion + ' min)' : ''}${d.rpe ? ', RPE ' + d.rpe + '/10' : ''}`}`);
       } else if(e.type === 'bano'){
         const d = e.data;
+        if(d.fue === false){ lines.push(`- [${e.time}] Baño: no fue en todo el día`); return; }
         const extras = Array.isArray(d.extras) && d.extras.length ? d.extras.join(', ') : '';
         const detalle = [d.tipo, extras, d.nota].filter(Boolean).join(' · ');
         lines.push(`- [${e.time}] Baño${detalle ? ': ' + detalle : ''}`);

@@ -46,7 +46,15 @@ const ES_TO_EN = {
 
   // lácteos
   'leche': 'milk', 'leche entera': 'milk whole', 'leche descremada': 'milk nonfat',
-  'leche en polvo': 'milk dry', 'queso': 'cheese', 'queso blanco': 'queso fresco',
+  'leche en polvo': 'milk dry', 'leche deslactosada': 'lactose free milk',
+  'leche sin lactosa': 'lactose free milk', 'leche semidescremada': 'milk reduced fat',
+  'leche condensada': 'condensed milk', 'leche evaporada': 'evaporated milk',
+  'leche de almendras': 'almond milk', 'leche de soya': 'soy milk', 'leche de coco': 'coconut milk',
+  'leche de avena': 'oat milk', 'leche achocolatada': 'chocolate milk',
+  'deslactosada': 'lactose free', 'deslactosado': 'lactose free', 'sin lactosa': 'lactose free',
+  'descremada': 'nonfat', 'descremado': 'nonfat', 'semidescremada': 'reduced fat',
+  'entera': 'whole', 'griego': 'greek', 'light': 'light', 'sin azucar': 'sugar free',
+  'queso crema': 'cream cheese', 'crema de leche': 'heavy cream', 'requeson': 'ricotta', 'queso': 'cheese', 'queso blanco': 'queso fresco',
   'queso amarillo': 'cheese cheddar', 'queso mozzarella': 'cheese mozzarella',
   'yogur': 'yogurt', 'yogurt': 'yogurt', 'yogur griego': 'yogurt greek',
   'mantequilla': 'butter', 'margarina': 'margarine', 'crema': 'cream', 'natilla': 'sour cream',
@@ -92,18 +100,30 @@ export function normalizeText(str) {
 
 /**
  * Devuelve la búsqueda en inglés para USDA, o null si el diccionario no la conoce.
- * Prueba la frase completa, luego sin plural, y luego palabra por palabra
- * (solo si todas las palabras se conocen; "con"/"de"/"y" se ignoran).
+ * Prueba la frase completa, luego sin plural, y luego por trozos: en cada paso
+ * toma la frase más larga (hasta 3 palabras) que esté en el diccionario, así
+ * "yogur griego deslactosado" -> "yogurt greek" + "lactose free". Si alguna
+ * palabra no se conoce devuelve null y foods.js usa MyMemory.
  */
 export function dictQueryToEnglish(query) {
   const q = normalizeText(query);
   if (!q) return null;
-  if (ES_TO_EN[q]) return ES_TO_EN[q];
-  const singular = q.replace(/(es|s)$/, '');
-  if (ES_TO_EN[singular]) return ES_TO_EN[singular];
+  const lookup = k => ES_TO_EN[k] || ES_TO_EN[k.replace(/(es|s)$/, '')];
+  if (lookup(q)) return lookup(q);
 
-  const words = q.split(' ').filter(w => !['con', 'de', 'del', 'y', 'la', 'el'].includes(w));
+  const words = q.split(' ');
   if (words.length < 2) return null;
-  const parts = words.map(w => ES_TO_EN[w] || ES_TO_EN[w.replace(/(es|s)$/, '')]);
-  return parts.every(Boolean) ? parts.join(' ') : null;
+  const STOP = ['con', 'de', 'del', 'y', 'la', 'el', 'en'];
+  const parts = [];
+  for (let i = 0; i < words.length;) {
+    let found = null, len = 0;
+    for (let n = Math.min(3, words.length - i); n >= 1 && !found; n--) {
+      const t = lookup(words.slice(i, i + n).join(' '));
+      if (t) { found = t; len = n; }
+    }
+    if (found) { parts.push(found); i += len; continue; }
+    if (STOP.includes(words[i])) { i++; continue; }
+    return null;
+  }
+  return parts.length ? parts.join(' ') : null;
 }

@@ -1,6 +1,6 @@
-import { supabase } from './supabaseClient.js?v=14';
-import { USDA_API_KEY } from './config.js?v=14';
-import { dictQueryToEnglish, normalizeText } from './foodDict.js?v=14';
+import { supabase } from './supabaseClient.js?v=15';
+import { USDA_API_KEY } from './config.js?v=15';
+import { dictQueryToEnglish, normalizeText } from './foodDict.js?v=15';
 
 // Campos nutricionales que manejamos en toda la app, en el orden
 // en que se muestran. Un solo lugar para no desincronizar listas.
@@ -241,12 +241,15 @@ function usdaFoodToRow(food) {
   };
 }
 
-async function usdaRequest(query, dataType, pageSize) {
+async function usdaRequest(query, dataType, pageSize, allWords = false) {
   const url = new URL('https://api.nal.usda.gov/fdc/v1/foods/search');
   url.searchParams.set('api_key', USDA_API_KEY);
   url.searchParams.set('query', query);
   url.searchParams.set('pageSize', String(pageSize));
   url.searchParams.set('dataType', dataType);
+  // por defecto USDA acepta CUALQUIER palabra: "leche deslactosada" traía
+  // "galleta de leche" y "tres leches". Con esto tienen que estar todas.
+  if (allWords) url.searchParams.set('requireAllWords', 'true');
   const res = await fetch(url.toString());
   if (!res.ok) throw new Error('USDA search failed: ' + res.status);
   const json = await res.json();
@@ -260,18 +263,21 @@ async function usdaRequest(query, dataType, pageSize) {
  */
 export async function searchUsda(query, userEmail) {
   if (!query || query.trim().length < 2) return { rows: [], enQuery: '' };
-  // Dos peticiones en paralelo:
+  // Tres peticiones en paralelo, todas exigiendo todas las palabras en las de marca:
   //  - genéricos (Foundation/SR Legacy) con la búsqueda en inglés: USDA está en inglés.
   //  - de marca con lo que escribió el usuario: así salen productos latinos ("Savoy").
-  const brandedP = usdaRequest(query.trim(), 'Branded', 15).catch(() => []);
+  //  - de marca con la búsqueda en inglés: "lactose free milk" (Lactaid, Natrel...).
+  const brandedEsP = usdaRequest(query.trim(), 'Branded', 15, true).catch(() => []);
   const enQuery = await queryToEnglish(query, userEmail);
   const genericP = usdaRequest(enQuery, 'Foundation,SR Legacy', 50).catch(() => []);
-  const [generic, branded] = await Promise.all([genericP, brandedP]);
+  const sameQuery = normalizeText(enQuery) === normalizeText(query);
+  const brandedEnP = sameQuery ? Promise.resolve([]) : usdaRequest(enQuery, 'Branded', 15, true).catch(() => []);
+  const [generic, brandedEs, brandedEn] = await Promise.all([genericP, brandedEsP, brandedEnP]);
 
   // USDA repite fichas idénticas (mismo nombre, marca y kcal): se deja una.
   const seen = new Set();
   const rows = [];
-  for (const f of [...generic, ...branded]) {
+  for (const f of [...generic, ...brandedEn, ...brandedEs]) {
     const row = usdaFoodToRow(f);
     const key = [normalizeText(row._en), normalizeText(row.brand), Math.round(row.kcal ?? -1)].join('|');
     if (seen.has(f.fdcId) || seen.has(key)) continue;
@@ -365,11 +371,17 @@ export async function searchLocalFoods(query) {
   if (!query || query.trim().length < 2) return [];
   // busca en el nombre o en la marca ("Savoy" encuentra tus alimentos de esa marca);
   // fuera comas, paréntesis y asteriscos, que en el filtro "or" de Supabase son sintaxis
-  const q = query.trim().replace(/[,()*]/g, ' ');
+  const q = query.trim().replace(/[,()*]/g, ' ').replace(/\s+/g, ' ');
+  // el nombre tiene que tener TODAS las palabras, en cualquier orden:
+  // "leche deslactosada" encuentra "Leche Savoy deslactosada"
+  const words = q.split(' ').filter(w => w.length > 1 && !['de', 'del', 'con', 'la', 'el', 'y'].includes(w.toLowerCase()));
+  const nameCond = words.length > 1
+    ? `and(${words.map(w => `name.ilike.*${w}*`).join(',')})`
+    : `name.ilike.*${q}*`;
   const { data, error } = await supabase
     .from('foods')
     .select('*')
-    .or(`name.ilike.*${q}*,brand.ilike.*${q}*`)
+    .or(`${nameCond},brand.ilike.*${q}*`)
     .order('name', { ascending: true })
     .limit(15);
   if (error) throw error;
