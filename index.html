@@ -15,20 +15,20 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/styles.css?v=11">
+<link rel="stylesheet" href="css/styles.css?v=12">
 <!-- Precarga en paralelo: sin esto el navegador descubre cada módulo
      solo después de bajar el anterior (una cascada en serie). -->
 <link rel="modulepreload" href="https://esm.sh/@supabase/supabase-js@2.119.0/es2022/supabase-js.bundle.mjs" crossorigin>
-<link rel="modulepreload" href="js/app.js?v=11">
-<link rel="modulepreload" href="js/supabaseClient.js?v=11">
-<link rel="modulepreload" href="js/config.js?v=11">
-<link rel="modulepreload" href="js/auth.js?v=11">
-<link rel="modulepreload" href="js/foods.js?v=11">
-<link rel="modulepreload" href="js/foodDict.js?v=11">
-<link rel="modulepreload" href="js/basics.js?v=11">
-<link rel="modulepreload" href="js/activity.js?v=11">
-<link rel="modulepreload" href="js/report.js?v=11">
-<link rel="modulepreload" href="js/health.js?v=11">
+<link rel="modulepreload" href="js/app.js?v=12">
+<link rel="modulepreload" href="js/supabaseClient.js?v=12">
+<link rel="modulepreload" href="js/config.js?v=12">
+<link rel="modulepreload" href="js/auth.js?v=12">
+<link rel="modulepreload" href="js/foods.js?v=12">
+<link rel="modulepreload" href="js/foodDict.js?v=12">
+<link rel="modulepreload" href="js/basics.js?v=12">
+<link rel="modulepreload" href="js/activity.js?v=12">
+<link rel="modulepreload" href="js/report.js?v=12">
+<link rel="modulepreload" href="js/health.js?v=12">
 </head>
 <body>
 
@@ -72,12 +72,17 @@
     <div class="stat-strip" id="statStrip"></div>
   </header>
 
+  <!-- Hoy se lee de arriba hacia abajo: cómo voy → qué me falta hoy → registrar → qué hice -->
   <div class="panel active" id="panel-hoy">
     <div id="ringRow"></div>
-    <div id="dailyCard"></div>
+    <section class="day-tiles" id="dayTiles" aria-label="Estado de hoy"></section>
+    <section class="log-area" aria-label="Registrar">
+      <button class="food-cta" id="foodCtaBtn" type="button"><span class="fc-ic" aria-hidden="true">🍽️</span>Agregar comida</button>
+      <div class="favorites-row" id="favoritesRow"></div>
+      <div class="log-pills" id="logPills"></div>
+    </section>
     <div id="insightArea"></div>
-    <div class="favorites-row" id="favoritesRow"></div>
-    <div class="quick-grid" id="quickGrid"></div>
+    <h2 class="section-title">Tu día</h2>
     <div id="todayTimeline"></div>
   </div>
 
@@ -92,6 +97,7 @@
   <div class="panel" id="panel-datos">
     <div class="stat-grid" id="fullStats"></div>
 
+    <h2 class="section-title">Metas</h2>
     <div class="data-card">
       <h4>Tus metas diarias</h4>
       <p>Las barras de la pantalla principal se miden contra estos números. Si las cambias, valen desde hoy: los días anteriores se siguen midiendo con las de antes.</p>
@@ -126,6 +132,7 @@
       <button class="btn-ghost" id="saveBodyBtn">Guardar perfil físico</button>
     </div>
 
+    <h2 class="section-title">Cuerpo</h2>
     <div class="data-card">
       <h4>Peso corporal</h4>
       <p>Uno por día: si te pesas otra vez hoy, se reemplaza.</p>
@@ -136,6 +143,7 @@
       <div id="weightList"></div>
     </div>
 
+    <h2 class="section-title">Cuenta</h2>
     <div class="data-card">
       <h4>Tu perfil</h4>
       <p>Así te ven los demás en el ranking.</p>
@@ -185,6 +193,6 @@
     }
   })();
 </script>
-<script type="module" src="js/app.js?v=11"></script>
+<script type="module" src="js/app.js?v=12"></script>
 </body>
 </html>

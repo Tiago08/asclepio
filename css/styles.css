@@ -393,29 +393,89 @@ header{
 .calc-box b{ font-family: 'IBM Plex Mono', monospace; color: var(--text); font-weight: 500; }
 .macro-top .goal{ color: var(--text-faint); font-weight: 400; }
 
-/* ---------- hoy: agua y suplementos (fase 2) ---------- */
+/* ---------- hoy: mosaicos de estado del día ---------- */
 #ringRow .today-card{ margin-bottom: 10px; }
-.daily-card{
-  background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--shadow-sm);
-  padding: 14px 16px 12px; margin: 0 0 18px;
+.day-tiles{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 0 22px; }
+.tile{ position: relative; background: var(--surface); border-radius: var(--r-md); box-shadow: var(--shadow-sm); min-width: 0; }
+.tile-main{
+  display: flex; flex-direction: column; gap: 3px; width: 100%; min-height: 92px;
+  background: none; border: none; border-radius: inherit; padding: 13px 14px 12px; text-align: left; color: inherit;
+  transition: background 120ms ease;
 }
-.dc-water{ display: block; width: 100%; background: none; border: none; padding: 0; text-align: left; }
-.dc-water .kh-top{ display: flex; margin-bottom: 8px; }
-.dc-num{ font-size: 13px; color: var(--text-dim); }
-.dc-num b{ font-family: 'IBM Plex Mono', monospace; font-size: 17px; color: var(--text); font-weight: 600; }
-.dc-bar{ display: block; height: 6px; margin-bottom: 10px; }
-.dc-bar .kh-bar-fill{ display: block; }
-.dc-btns{ display: flex; gap: 8px; flex-wrap: wrap; --cat-color: var(--c-agua); }
-.dc-btns .chip{ padding: 7px 12px; font-size: 12.5px; }
-.dc-btns .chip:active{ background: var(--surface-raised); }
-.dc-remove{ margin-top: 8px; animation: fade-in 160ms ease; }
-.dc-btns .chip-remove{ color: var(--danger); }
-.dc-elec{ font-size: 11.5px; color: var(--text-faint); margin-top: 9px; }
-.dc-elec b{ font-family: 'IBM Plex Mono', monospace; color: var(--text-dim); font-weight: 500; }
-.dc-supps{ display: flex; gap: 8px; overflow-x: auto; margin-top: 10px; --cat-color: var(--c-supl); scrollbar-width: none; }
-.dc-supps::-webkit-scrollbar{ display: none; }
-.dc-supps .chip{ flex: 0 0 auto; padding: 7px 12px; font-size: 12.5px; white-space: nowrap; }
-.supp-add{ color: var(--text-faint) !important; }
+.tile-main:active{ background: var(--surface-raised); }
+.tile-h{ display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
+.tile-ic{ font-size: 13px; line-height: 1; }
+.tile-v{
+  font-family: 'IBM Plex Mono', monospace; font-size: 18px; font-weight: 500; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px;
+}
+.tile-v small{ font-family: 'Space Grotesk', system-ui, sans-serif; font-size: 12.5px; color: var(--text-faint); font-weight: 400; }
+.tile-empty{ font-family: 'Space Grotesk', system-ui, sans-serif; font-size: 15px; color: var(--text-faint); }
+.tile-text{ font-family: 'Space Grotesk', system-ui, sans-serif; font-size: 16px; }
+.tile.is-done .tile-h{ color: var(--cat-color); }
+.tile-sub{ font-size: 11.5px; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile-bar{ display: block; height: 5px; border-radius: 99px; background: var(--surface-sunken); overflow: hidden; margin-top: 7px; width: calc(100% - 44px); }
+.tile-bar > span{ display: block; height: 100%; border-radius: 99px; background: var(--cat-color, var(--c-agua)); transition: width 300ms ease; }
+.tile-dots{ display: flex; gap: 4px; margin-top: 7px; }
+.tile-dots i{ width: 14px; height: 5px; border-radius: 99px; background: var(--surface-sunken); }
+.tile-dots i.on{ background: var(--cat-color); }
+/* el + es un botón aparte (no dentro del otro): 44 px para el dedo */
+.tile-plus{
+  position: absolute; right: 8px; bottom: 8px; width: 40px; height: 40px; border-radius: 50%;
+  border: none; background: var(--cat-color); color: #0e1115; font-size: 22px; line-height: 1; font-weight: 500;
+  display: flex; align-items: center; justify-content: center; transition: transform 120ms ease;
+}
+.tile-plus:active{ transform: scale(0.92); }
+.tile-plus:disabled{ opacity: 0.6; }
+
+/* ---------- hoy: registrar ---------- */
+.log-area{ margin-bottom: 18px; }
+.food-cta{
+  display: flex; align-items: center; justify-content: center; gap: 9px; width: 100%;
+  background: var(--c-comida); color: #0e1115; border: none; border-radius: var(--r-md);
+  padding: 15px 0; font-size: 15px; font-weight: 600; transition: transform 120ms ease;
+}
+.food-cta:active{ transform: scale(0.98); }
+.fc-ic{ font-size: 17px; line-height: 1; }
+.log-area .favorites-row{ padding: 10px 0 0; scrollbar-width: none; }
+.log-area .favorites-row::-webkit-scrollbar{ display: none; }
+.log-area .favorites-row:empty{ display: none; }
+.fav-combo{ color: var(--c-comida); }
+.log-pills{ display: flex; gap: 8px; margin-top: 10px; }
+.log-pill{
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
+  background: var(--surface); border: none; border-radius: 99px; box-shadow: var(--shadow-sm);
+  padding: 11px 0; font-size: 13px; color: var(--text-dim);
+}
+.log-pill:active{ background: var(--surface-raised); }
+
+.section-title{
+  font-size: 11.5px; font-weight: 500; color: var(--text-faint); text-transform: uppercase;
+  letter-spacing: 0.08em; margin: 24px 2px 10px;
+}
+#panel-hoy .section-title{ margin-top: 6px; }
+
+/* ---------- hojas: agua y suplementos ---------- */
+.sheet-stat{ font-size: 13px; color: var(--text-dim); margin-bottom: 14px; }
+.sheet-stat b{ font-family: 'IBM Plex Mono', monospace; font-size: 24px; color: var(--text); font-weight: 600; }
+.sheet-stat .tile-bar{ width: 100%; height: 6px; margin-top: 8px; }
+.sheet-quick{ margin-bottom: 15px; }
+.chip-remove{ color: var(--danger) !important; }
+.check-list{ display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.check-row{
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px;
+  background: var(--surface-sunken); border: none; border-radius: var(--r-md); padding: 12px 14px;
+  text-align: left; font-size: 15px; color: var(--text); transition: background 120ms ease;
+}
+.check-row:active{ background: var(--surface-raised); }
+.check-box{
+  width: 26px; height: 26px; flex: none; border-radius: 50%; border: 2px solid var(--text-faint);
+  display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: #0e1115;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+.check-row.on .check-box{ background: var(--cat-color); border-color: var(--cat-color); }
+.check-row.on .check-name{ color: var(--text-dim); }
+.check-dose{ margin-left: auto; font-size: 12.5px; color: var(--text-faint); }
 
 /* listas cortas dentro de la hoja (combos, agua, suplementos, peso) */
 .combo-items{ background: var(--surface-sunken); border-radius: var(--r-md); }

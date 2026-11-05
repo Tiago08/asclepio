@@ -1,21 +1,21 @@
-import { supabase } from './supabaseClient.js?v=11';
+import { supabase } from './supabaseClient.js?v=12';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js?v=11';
+} from './auth.js?v=12';
 import {
   NUTRIENT_FIELDS, MICRO_FIELDS, searchUsda, searchLocalFoods, searchFavorites, updateFood,
   cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel
-} from './foods.js?v=11';
-import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=11';
-import { buildReportText, downloadText } from './report.js?v=11';
-import { BASICS, searchBasics } from './basics.js?v=11';
+} from './foods.js?v=12';
+import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=12';
+import { buildReportText, downloadText } from './report.js?v=12';
+import { BASICS, searchBasics } from './basics.js?v=12';
 import {
   getGoalHistory, saveGoalsFrom, goalsForDate, getBodyProfile, saveBodyProfile, suggestGoals,
   getWeights, saveWeight, deleteWeight, getSupplements, addSupplement, retireSupplement,
   getSupplementLogs, getSupplementLogsInRange, setSupplementTaken, getWaterLogs, addWater, deleteWater,
   electrolyteTotals, getCombos, createCombo, deleteCombo
-} from './health.js?v=11';
+} from './health.js?v=12';
 
 /* ================= utilidades de hora ================= */
 
@@ -197,7 +197,6 @@ const statStrip = document.getElementById('statStrip');
 const ringRow = document.getElementById('ringRow');
 const insightArea = document.getElementById('insightArea');
 const favoritesRow = document.getElementById('favoritesRow');
-const quickGrid = document.getElementById('quickGrid');
 const formArea = document.getElementById('formArea');
 const sheet = document.getElementById('sheet');
 const sheetBackdrop = document.getElementById('sheetBackdrop');
@@ -332,7 +331,7 @@ onAuthChange(handleSession);
 
 async function bootApp(){
   todayDateEl.textContent = new Date().toLocaleDateString('es-VE', { weekday:'short', day:'numeric', month:'short' });
-  renderQuickGrid();
+  renderLogActions();
   try{
     await ensureProfile(user);
     profile = await getMyProfile(user.id);
@@ -367,28 +366,6 @@ async function loadPhase2Data(){
 }
 let phase2Error = null;
 
-/* ================= quick grid ================= */
-
-function renderQuickGrid(){
-  quickGrid.innerHTML = '';
-  const comidaBtn = document.createElement('button');
-  comidaBtn.className = 'quick-btn';
-  comidaBtn.style.setProperty('--cat-color', CAT_COLOR.comida);
-  comidaBtn.innerHTML = `<span class="ic">🍽️</span><span class="lb">Comida</span>`;
-  comidaBtn.addEventListener('click', openFoodForm);
-  quickGrid.appendChild(comidaBtn);
-
-  Object.keys(TYPES).forEach(typeKey => {
-    const t = TYPES[typeKey];
-    const btn = document.createElement('button');
-    btn.className = 'quick-btn';
-    btn.style.setProperty('--cat-color', t.color);
-    btn.innerHTML = `<span class="ic">${t.icon}</span><span class="lb">${t.label}</span>`;
-    btn.addEventListener('click', () => openActivityForm(typeKey));
-    quickGrid.appendChild(btn);
-  });
-}
-
 /* ================= favoritos (1-toque) ================= */
 
 // alimentos que el usuario ya registró (por frecuencia): suben en la búsqueda
@@ -402,8 +379,13 @@ async function renderFavorites(){
     usedFoods = used;
     usedFoodIds = new Set(used.map(f => f.id));
     const favs = used.slice(0, 6);
-    if(favs.length === 0){ favoritesRow.innerHTML = ''; return; }
-    favoritesRow.innerHTML = favs.map(f => `<button class="fav-chip" data-fav="${f.id}">${escapeHtml(f.name)}</button>`).join('');
+    // combos primero (abren su hoja para confirmar), luego tus alimentos de un toque
+    const comboChips = combos.slice(0, 3).map((c, i) => `<button class="fav-chip fav-combo" data-fav-combo="${i}" type="button">🧺 ${escapeHtml(c.name)}</button>`).join('');
+    if(favs.length === 0 && !comboChips){ favoritesRow.innerHTML = ''; return; }
+    favoritesRow.innerHTML = comboChips + favs.map(f => `<button class="fav-chip" data-fav="${f.id}" type="button">${escapeHtml(f.name)}</button>`).join('');
+    favoritesRow.querySelectorAll('[data-fav-combo]').forEach(btn => {
+      btn.addEventListener('click', () => openComboLog(combos[Number(btn.dataset.favCombo)]));
+    });
     favoritesRow.querySelectorAll('[data-fav]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const food = favs.find(f => f.id === btn.dataset.fav);
@@ -1013,6 +995,7 @@ function openComboBuilder(){
       await createCombo(user.id, name, d.items.map(it => ({ food_id: it.food.id, quantity: it.quantity, label: it.label })));
       combos = await getCombos(user.id);
       comboDraft = null;
+      renderFavorites();
       showToast('Combo guardado');
       openFoodForm();
     }catch(err){
@@ -1057,6 +1040,7 @@ function openComboLog(combo){
     try{
       await deleteCombo(combo.id);
       combos = combos.filter(c => c.id !== combo.id);
+      renderFavorites();
       showToast('Combo eliminado');
       openFoodForm();
     }catch(err){ showToast('Error: ' + err.message); }
@@ -1268,13 +1252,16 @@ function entryRow(e){
     </div>`;
 }
 
+let todayEntries = [];   // registros de hoy (comida y actividades), para los mosaicos
+
 async function renderToday(){
   const wrap = document.getElementById('todayTimeline');
   wrap.innerHTML = `<div class="search-empty"><span class="spinner"></span> cargando...</div>`;
   try{
     const list = await getEntriesForDate(user.id, todayStr());
+    todayEntries = list;
     if(list.length === 0){
-      wrap.innerHTML = `<div class="empty-state">Nada registrado todavía hoy.<br>Usa los botones de arriba.</div>`;
+      wrap.innerHTML = `<div class="empty-state">Lo que registres hoy aparecerá aquí, en orden.</div>`;
     } else {
       wrap.innerHTML = `<div class="timeline">${list.map(entryRow).join('')}</div>`;
     }
@@ -1283,93 +1270,118 @@ async function renderToday(){
     renderRings(foods);
   }catch(err){
     wrap.innerHTML = `<div class="empty-state">Error cargando: ${escapeHtml(err.message)}</div>`;
+    todayEntries = [];
     todayFoodRows = [];
     renderRings([]);
   }
   renderDaily();
 }
 
-/* ================= hoy: agua, electrolitos y suplementos ================= */
+/* ================= hoy: mosaicos de estado del día ================= */
+/* Cuatro cosas que se hacen una vez al día o se cuentan con un toque. Cada
+   mosaico muestra el RESULTADO (cómo vas), no un botón genérico: como un LED
+   de estado en un tablero. Tocarlo abre el detalle en la hoja inferior. */
 
-const dailyCard = document.getElementById('dailyCard');
+const dayTiles = document.getElementById('dayTiles');
 // 1250 ml -> "1,25"
 function fmtLiters(ml){ return String(Math.round(ml / 10) / 100).replace('.', ','); }
-let waterEditOpen = false;   // fila de "quitar" del agua, visible solo al tocar la barra
+function waterTotal(){ return waterToday.reduce((s, w) => s + Number(w.ml), 0); }
+function lastOfType(type){
+  const list = todayEntries.filter(e => e.kind === 'activity' && e.type === type);
+  return list.length ? list[list.length - 1] : null;
+}
+
+function tileHtml({ id, color, icon, label, value, sub, done, extra = '' }){
+  return `
+    <div class="tile${done ? ' is-done' : ''}" style="--cat-color:${color}">
+      <button class="tile-main" id="${id}" type="button">
+        <span class="tile-h"><span class="tile-ic" aria-hidden="true">${icon}</span>${label}</span>
+        <span class="tile-v">${value}</span>
+        <span class="tile-sub">${sub}</span>
+      </button>
+      ${extra}
+    </div>`;
+}
 
 function renderDaily(){
-  if(!profile){ dailyCard.innerHTML = ''; return; }
-  const goal = goalsFor(todayStr()).goal_water_ml;
-  const ml = waterToday.reduce((s, w) => s + Number(w.ml), 0);
-  const el = electrolyteTotals(todayFoodRows, waterToday);
-  const hasEl = el.sodium_mg + el.potassium_mg + el.magnesium_mg > 0;
-  // el último vaso (por hora y, si empatan, por orden de registro)
-  const last = waterToday.length ? waterToday.reduce((a, b) => (String(b.log_time) >= String(a.log_time) ? b : a)) : null;
-  if(!last) waterEditOpen = false;
-  dailyCard.innerHTML = `
-    <div class="daily-card">
-      <button class="dc-water" id="waterOpenBtn" type="button" aria-expanded="${waterEditOpen}" aria-label="Agua de hoy: toca para quitar">
-        <span class="kh-top"><span class="kh-label">💧 Agua</span><span class="dc-num"><b>${fmtLiters(ml)}</b> / ${fmtLiters(goal)} L</span></span>
-        <span class="kh-bar dc-bar"><span class="kh-bar-fill" style="width:${pctWidth(ml, goal)}; background: var(--c-agua)"></span></span>
-      </button>
-      <div class="dc-btns">
-        <button class="chip" data-water="250" type="button">+250 ml</button>
-        <button class="chip" data-water="500" type="button">+500 ml</button>
-        <button class="chip" id="waterMoreBtn" type="button">Otro / suero</button>
-      </div>
-      ${waterEditOpen && last ? `
-      <div class="dc-btns dc-remove">
-        <button class="chip chip-remove" id="waterUndoBtn" type="button">− Quitar el último (${Math.round(last.ml)} ml)</button>
-        <button class="chip" id="waterListBtn" type="button">Ver todos</button>
-      </div>` : ''}
-      ${hasEl ? `<div class="dc-elec">Sodio <b>${Math.round(el.sodium_mg)}</b> · Potasio <b>${Math.round(el.potassium_mg)}</b> · Magnesio <b>${Math.round(el.magnesium_mg)}</b> mg</div>` : ''}
-      <div class="dc-supps">
-        ${supplements.map(s => `<button class="chip supp-chip${takenToday.has(s.id) ? ' selected' : ''}" data-supp="${s.id}" type="button" aria-pressed="${takenToday.has(s.id)}">${takenToday.has(s.id) ? '✓ ' : ''}${escapeHtml(s.name)}</button>`).join('')}
-        <button class="chip supp-add" id="suppManageBtn" type="button">${supplements.length ? '⚙' : '＋ Suplementos'}</button>
-      </div>
-    </div>`;
+  if(!profile){ dayTiles.innerHTML = ''; return; }
 
-  dailyCard.querySelectorAll('[data-water]').forEach(b => b.addEventListener('click', async () => {
-    b.disabled = true;
-    try{
-      const row = await addWater(user.id, { date: todayStr(), time: nowStr(), ml: Number(b.dataset.water) });
-      waterToday.push(row);
-      showToast(`+${b.dataset.water} ml`);
-      renderDaily();
-    }catch(err){ showToast('Error: ' + err.message); b.disabled = false; }
-  }));
-  // tocar la barra muestra u oculta la opción de quitar
-  dailyCard.querySelector('#waterOpenBtn').addEventListener('click', () => {
-    if(!waterToday.length){ showToast('Todavía no hay agua hoy'); return; }
-    waterEditOpen = !waterEditOpen;
-    renderDaily();
+  // agua
+  const goal = goalsFor(todayStr()).goal_water_ml;
+  const ml = waterTotal();
+  const water = tileHtml({
+    id: 'tileWater', color: 'var(--c-agua)', icon: '💧', label: 'Agua', done: ml >= goal,
+    value: `${fmtLiters(ml)} <small>/ ${fmtLiters(goal)} L</small>`,
+    sub: `<span class="tile-bar"><span style="width:${pctWidth(ml, goal)}"></span></span>`,
+    extra: `<button class="tile-plus" id="waterPlusBtn" type="button" aria-label="Sumar 250 ml de agua">+</button>`
   });
-  dailyCard.querySelector('#waterMoreBtn').addEventListener('click', openWaterForm);
-  if(waterEditOpen && last){
-    dailyCard.querySelector('#waterListBtn').addEventListener('click', () => { waterEditOpen = false; renderDaily(); openWaterForm(); });
-    dailyCard.querySelector('#waterUndoBtn').addEventListener('click', async (ev) => {
-      ev.currentTarget.disabled = true;
-      try{
-        await deleteWater(last.id);
-        waterToday = waterToday.filter(w => w.id !== last.id);
-        showToast(`−${Math.round(last.ml)} ml`);
-      }catch(err){ showToast('Error: ' + err.message); }
-      renderDaily();
-    });
+
+  // suplementos
+  const total = supplements.length;
+  const taken = supplements.filter(s => takenToday.has(s.id)).length;
+  const supp = tileHtml({
+    id: 'tileSupps', color: 'var(--c-supl)', icon: '💊', label: 'Suplementos', done: total > 0 && taken === total,
+    value: total === 0 ? '<span class="tile-empty">Agregar</span>' : (taken === total ? '✓ Listo' : `${taken} <small>de ${total}</small>`),
+    sub: total === 0 ? 'tu pila diaria' : `<span class="tile-dots">${supplements.map(s => `<i class="${takenToday.has(s.id) ? 'on' : ''}"></i>`).join('')}</span>`
+  });
+
+  // gym
+  const g = lastOfType('gym');
+  let gymV = '<span class="tile-empty">Registrar</span>', gymSub = '¿entrenaste hoy?';
+  if(g && g.data.fue === false){ gymV = '<span class="tile-text">Descanso</span>'; gymSub = 'día de recuperación'; }
+  else if(g){
+    const d = g.data;
+    gymV = `<span class="tile-text">${escapeHtml(Array.isArray(d.tipos) && d.tipos.length ? d.tipos.join(' + ') : 'Entreno')}</span>`;
+    gymSub = [d.rpe ? `RPE ${d.rpe}` : '', d.duracion ? `${d.duracion} min` : ''].filter(Boolean).join(' · ') || 'registrado';
   }
-  dailyCard.querySelector('#suppManageBtn').addEventListener('click', openSupplementsForm);
-  dailyCard.querySelectorAll('[data-supp]').forEach(b => b.addEventListener('click', async () => {
-    const id = b.dataset.supp;
-    const taken = !takenToday.has(id);
-    // se marca al instante; si falla, se deshace
-    taken ? takenToday.add(id) : takenToday.delete(id);
+  const gym = tileHtml({ id: 'tileGym', color: 'var(--c-gym)', icon: '🏋️', label: 'Gym', value: gymV, sub: gymSub, done: !!g });
+
+  // sueño
+  const s = lastOfType('sueno');
+  let sleepV = '<span class="tile-empty">Registrar</span>', sleepSub = '¿cómo dormiste?';
+  if(s){
+    const { dur } = calcSleep(s.data);
+    sleepV = dur != null ? fmtDur(dur).replace(' min', '') : `${s.data.horaDormir || '?'} → ${s.data.horaDespertar || '?'}`;
+    sleepSub = s.data.calidad ? `calidad ${s.data.calidad}/5` : 'registrado';
+  }
+  const sleep = tileHtml({ id: 'tileSleep', color: 'var(--c-sueno)', icon: '🌙', label: 'Sueño', value: sleepV, sub: sleepSub, done: !!s });
+
+  dayTiles.innerHTML = water + supp + gym + sleep;
+
+  dayTiles.querySelector('#tileWater').addEventListener('click', openWaterForm);
+  dayTiles.querySelector('#waterPlusBtn').addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    await quickWater(250);
+    btn.disabled = false;
+  });
+  dayTiles.querySelector('#tileSupps').addEventListener('click', openSupplementsForm);
+  dayTiles.querySelector('#tileGym').addEventListener('click', () => openActivityForm('gym'));
+  dayTiles.querySelector('#tileSleep').addEventListener('click', () => openActivityForm('sueno'));
+}
+
+/* ---- registrar: comida (lo más frecuente) y el resto en pastillas ---- */
+
+function renderLogActions(){
+  document.getElementById('foodCtaBtn').onclick = openFoodForm;
+  const pills = ['bano', 'energia', 'nota'];
+  const wrap = document.getElementById('logPills');
+  wrap.innerHTML = pills.map(k => `
+    <button class="log-pill" data-log="${k}" type="button" style="--cat-color:${TYPES[k].color}">
+      <span aria-hidden="true">${TYPES[k].icon}</span>${TYPES[k].label}</button>`).join('');
+  wrap.querySelectorAll('[data-log]').forEach(b => b.addEventListener('click', () => openActivityForm(b.dataset.log)));
+}
+
+/* ---- agua ---- */
+
+async function quickWater(ml){
+  try{
+    const row = await addWater(user.id, { date: todayStr(), time: nowStr(), ml });
+    waterToday.push(row);
+    showToast(`+${ml} ml · ${fmtLiters(waterTotal())} L hoy`);
     renderDaily();
-    try{ await setSupplementTaken(user.id, id, todayStr(), taken); }
-    catch(err){
-      taken ? takenToday.delete(id) : takenToday.add(id);
-      renderDaily();
-      showToast('Error: ' + err.message);
-    }
-  }));
+    return true;
+  }catch(err){ showToast('Error: ' + err.message); return false; }
 }
 
 function openWaterForm(){
@@ -1377,27 +1389,59 @@ function openWaterForm(){
   const card = document.createElement('div');
   card.className = 'form-card';
   card.style.setProperty('--cat-color', 'var(--c-agua)');
+  const goal = goalsFor(todayStr()).goal_water_ml;
+  const ml = waterTotal();
   const list = waterToday.slice().sort((a, b) => String(a.log_time).localeCompare(String(b.log_time)));
+  const last = list.length ? list[list.length - 1] : null;
+  const el = electrolyteTotals(todayFoodRows, waterToday);
+  const hasEl = el.sodium_mg + el.potassium_mg + el.magnesium_mg > 0;
   card.innerHTML = `
-    <h3><span>💧</span> Agua y electrolitos</h3>
-    ${list.length ? `<div class="combo-items">${list.map(w => `
+    <h3><span>💧</span> Agua</h3>
+    <div class="sheet-stat"><b>${fmtLiters(ml)}</b> / ${fmtLiters(goal)} L
+      <span class="tile-bar"><span style="width:${pctWidth(ml, goal)}"></span></span></div>
+    <div class="chip-row sheet-quick">
+      <button class="chip" data-add="250" type="button">+250 ml</button>
+      <button class="chip" data-add="500" type="button">+500 ml</button>
+      <button class="chip" data-add="750" type="button">+750 ml</button>
+      ${last ? `<button class="chip chip-remove" id="waterUndoBtn" type="button">− Quitar el último (${Math.round(last.ml)} ml)</button>` : ''}
+    </div>
+    ${hasEl ? `<div class="calc-box">Electrolitos de hoy (comida + bebidas)<br>Sodio <b>${Math.round(el.sodium_mg)}</b> · Potasio <b>${Math.round(el.potassium_mg)}</b> · Magnesio <b>${Math.round(el.magnesium_mg)}</b> mg</div>` : ''}
+    ${list.length ? `<div class="search-section-title">Hoy</div><div class="combo-items">${list.map(w => `
       <div class="combo-item"><span><span class="mono entry-time">${String(w.log_time).slice(0, 5)}</span> ${Math.round(w.ml)} ml${w.label ? ' · ' + escapeHtml(w.label) : ''}</span>
         <button class="entry-del" data-del-water="${w.id}" type="button">eliminar</button></div>`).join('')}</div>` : ''}
-    <div class="field" style="margin-top:14px"><label>Cantidad (ml)</label>
-      <input type="number" id="w_ml" inputmode="numeric" min="1" step="any" placeholder="250"></div>
-    <div class="field"><label>Qué bebiste (opcional)</label><input type="text" id="w_label" placeholder="Ej: Suero oral, bebida deportiva"></div>
-    <p class="form-hint" style="margin-top:0">Si es un suero o bebida con electrolitos, copia lo que dice la etiqueta para esa cantidad. Si es agua, déjalo en blanco.</p>
-    <div class="row-3">
-      <div class="field"><label>Sodio (mg)</label><input type="number" id="w_na" inputmode="decimal" min="0" step="any" placeholder="opcional"></div>
-      <div class="field"><label>Potasio (mg)</label><input type="number" id="w_k" inputmode="decimal" min="0" step="any" placeholder="opcional"></div>
-      <div class="field"><label>Magnesio (mg)</label><input type="number" id="w_mg" inputmode="decimal" min="0" step="any" placeholder="opcional"></div>
-    </div>
-    <div class="form-actions">
-      <button class="btn-ghost" id="cancelBtn">Cerrar</button>
-      <button class="btn-primary" id="saveBtn">Agregar</button>
-    </div>`;
+    <details class="more-fields" id="waterCustom">
+      <summary>Otra cantidad, suero o bebida con electrolitos</summary>
+      <div class="field" style="margin-top:8px"><label>Cantidad (ml)</label>
+        <input type="number" id="w_ml" inputmode="numeric" min="1" step="any" placeholder="330"></div>
+      <div class="field"><label>Qué bebiste (opcional)</label><input type="text" id="w_label" placeholder="Ej: Suero oral"></div>
+      <p class="form-hint" style="margin-top:0">Si trae electrolitos, copia lo que dice la etiqueta para esa cantidad.</p>
+      <div class="row-3">
+        <div class="field"><label>Sodio (mg)</label><input type="number" id="w_na" inputmode="decimal" min="0" step="any" placeholder="opcional"></div>
+        <div class="field"><label>Potasio (mg)</label><input type="number" id="w_k" inputmode="decimal" min="0" step="any" placeholder="opcional"></div>
+        <div class="field"><label>Magnesio (mg)</label><input type="number" id="w_mg" inputmode="decimal" min="0" step="any" placeholder="opcional"></div>
+      </div>
+      <button class="btn-primary" id="saveBtn" type="button" style="width:100%">Agregar</button>
+    </details>
+    <div class="form-actions"><button class="btn-ghost" id="cancelBtn">Cerrar</button></div>`;
   formArea.appendChild(card);
   card.querySelector('#cancelBtn').addEventListener('click', closeForm);
+  // la hoja se queda abierta: se puede sumar varias veces seguidas
+  card.querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', async () => {
+    b.disabled = true;
+    if(await quickWater(Number(b.dataset.add))) openWaterForm(); else b.disabled = false;
+  }));
+  if(last){
+    card.querySelector('#waterUndoBtn').addEventListener('click', async (ev) => {
+      ev.currentTarget.disabled = true;
+      try{
+        await deleteWater(last.id);
+        waterToday = waterToday.filter(w => w.id !== last.id);
+        showToast(`−${Math.round(last.ml)} ml`);
+        renderDaily();
+        openWaterForm();
+      }catch(err){ showToast('Error: ' + err.message); ev.currentTarget.disabled = false; }
+    });
+  }
   card.querySelectorAll('[data-del-water]').forEach(b => b.addEventListener('click', async () => {
     try{
       await deleteWater(b.dataset.delWater);
@@ -1408,50 +1452,82 @@ function openWaterForm(){
   }));
   card.querySelector('#saveBtn').addEventListener('click', async (ev) => {
     const num = id => { const v = card.querySelector(id).value; return v === '' ? null : Number(v); };
-    const ml = num('#w_ml');
-    if(!(ml > 0)){ showToast('Escribe los mililitros'); return; }
+    const amount = num('#w_ml');
+    if(!(amount > 0)){ showToast('Escribe los mililitros'); return; }
     ev.currentTarget.disabled = true;
     try{
       const row = await addWater(user.id, {
-        date: todayStr(), time: nowStr(), ml,
+        date: todayStr(), time: nowStr(), ml: amount,
         label: card.querySelector('#w_label').value.trim() || null,
         sodium_mg: num('#w_na'), potassium_mg: num('#w_k'), magnesium_mg: num('#w_mg')
       });
       waterToday.push(row);
       renderDaily();
-      closeForm();
-      showToast(`+${Math.round(ml)} ml`);
+      showToast(`+${Math.round(amount)} ml`);
+      openWaterForm();
     }catch(err){ showToast('Error: ' + err.message); ev.currentTarget.disabled = false; }
   });
 }
+
+/* ---- suplementos: checklist de hoy + editar la pila ---- */
 
 function openSupplementsForm(){
   resetForm();
   const card = document.createElement('div');
   card.className = 'form-card';
   card.style.setProperty('--cat-color', 'var(--c-supl)');
+  const empty = supplements.length === 0;
   card.innerHTML = `
-    <h3><span>💊</span> Tu pila de suplementos</h3>
-    <p class="form-hint">Aparecen en Hoy como fichas: tócalas cuando los tomes.</p>
-    ${supplements.length ? `<div class="combo-items">${supplements.map(s => `
-      <div class="combo-item"><span>${escapeHtml(s.name)}${s.dose ? ` <span class="ci-dose">${escapeHtml(s.dose)}</span>` : ''}</span>
-        <button class="entry-del" data-retire="${s.id}" type="button">quitar</button></div>`).join('')}</div>` : ''}
-    <div class="row-2" style="margin-top:14px">
-      <div class="field"><label>Suplemento</label><input type="text" id="s_name" placeholder="Ej: Creatina"></div>
-      <div class="field"><label>Dosis (opcional)</label><input type="text" id="s_dose" placeholder="Ej: 5 g"></div>
-    </div>
-    <div class="form-actions">
-      <button class="btn-ghost" id="cancelBtn">Cerrar</button>
-      <button class="btn-primary" id="saveBtn">Agregar</button>
-    </div>`;
+    <h3><span>💊</span> Suplementos de hoy</h3>
+    ${empty ? '<p class="form-hint">Agrega lo que tomas a diario (creatina, magnesio, vitamina D…). Después lo marcas aquí con un toque.</p>' : `
+    <div class="check-list">${supplements.map(s => `
+      <button class="check-row${takenToday.has(s.id) ? ' on' : ''}" data-supp="${s.id}" type="button" aria-pressed="${takenToday.has(s.id)}">
+        <span class="check-box" aria-hidden="true">${takenToday.has(s.id) ? '✓' : ''}</span>
+        <span class="check-name">${escapeHtml(s.name)}</span>
+        ${s.dose ? `<span class="check-dose">${escapeHtml(s.dose)}</span>` : ''}
+      </button>`).join('')}</div>`}
+    <details class="more-fields" id="suppEdit"${empty ? ' open' : ''}>
+      <summary>${empty ? 'Tu pila' : 'Editar tu pila'}</summary>
+      ${empty ? '' : `<div class="combo-items" style="margin-top:8px">${supplements.map(s => `
+        <div class="combo-item"><span>${escapeHtml(s.name)}${s.dose ? ` <span class="ci-dose">${escapeHtml(s.dose)}</span>` : ''}</span>
+          <button class="entry-del" data-retire="${s.id}" type="button">quitar</button></div>`).join('')}</div>`}
+      <div class="row-2" style="margin-top:12px">
+        <div class="field"><label>Suplemento</label><input type="text" id="s_name" placeholder="Ej: Creatina"></div>
+        <div class="field"><label>Dosis (opcional)</label><input type="text" id="s_dose" placeholder="Ej: 5 g"></div>
+      </div>
+      <button class="btn-primary" id="saveBtn" type="button" style="width:100%">Agregar a la pila</button>
+    </details>
+    <div class="form-actions"><button class="btn-ghost" id="cancelBtn">Cerrar</button></div>`;
   formArea.appendChild(card);
   card.querySelector('#cancelBtn').addEventListener('click', closeForm);
+
+  card.querySelectorAll('[data-supp]').forEach(b => b.addEventListener('click', async () => {
+    const id = b.dataset.supp;
+    const taken = !takenToday.has(id);
+    // se marca al instante (sin redibujar la hoja); si falla, se deshace
+    const paint = on => {
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', on);
+      b.querySelector('.check-box').textContent = on ? '✓' : '';
+    };
+    taken ? takenToday.add(id) : takenToday.delete(id);
+    paint(taken);
+    renderDaily();
+    try{ await setSupplementTaken(user.id, id, todayStr(), taken); }
+    catch(err){
+      taken ? takenToday.delete(id) : takenToday.add(id);
+      paint(!taken);
+      renderDaily();
+      showToast('Error: ' + err.message);
+    }
+  }));
   card.querySelectorAll('[data-retire]').forEach(b => b.addEventListener('click', async () => {
     try{
       await retireSupplement(b.dataset.retire);
       supplements = supplements.filter(s => s.id !== b.dataset.retire);
       renderDaily();
       openSupplementsForm();
+      formArea.querySelector('#suppEdit')?.setAttribute('open', '');   // sigue editando
     }catch(err){ showToast('Error: ' + err.message); }
   }));
   card.querySelector('#saveBtn').addEventListener('click', async (ev) => {
@@ -1459,10 +1535,11 @@ function openSupplementsForm(){
     if(!name){ showToast('Escribe el nombre'); return; }
     ev.currentTarget.disabled = true;
     try{
-      const sort = supplements.reduce((m, s) => Math.max(m, s.sort || 0), 0) + 1;
+      const sort = supplements.reduce((m, x) => Math.max(m, x.sort || 0), 0) + 1;
       supplements.push(await addSupplement(user.id, name, card.querySelector('#s_dose').value.trim(), sort));
       renderDaily();
       openSupplementsForm();
+      formArea.querySelector('#suppEdit')?.setAttribute('open', '');
       showToast(`${name} agregado`);
     }catch(err){ showToast('Error: ' + err.message); ev.currentTarget.disabled = false; }
   });
