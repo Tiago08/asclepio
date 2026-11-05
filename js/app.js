@@ -1,21 +1,21 @@
-import { supabase } from './supabaseClient.js?v=13';
+import { supabase } from './supabaseClient.js?v=14';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js?v=13';
+} from './auth.js?v=14';
 import {
   NUTRIENT_FIELDS, MICRO_FIELDS, searchUsda, searchLocalFoods, searchFavorites, updateFood,
   cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel, pluralEs
-} from './foods.js?v=13';
-import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=13';
-import { buildReportText, downloadText } from './report.js?v=13';
-import { BASICS, searchBasics } from './basics.js?v=13';
+} from './foods.js?v=14';
+import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=14';
+import { buildReportText, downloadText } from './report.js?v=14';
+import { BASICS, searchBasics } from './basics.js?v=14';
 import {
   getGoalHistory, saveGoalsFrom, goalsForDate, getBodyProfile, saveBodyProfile, suggestGoals, PACES, paceOf, objectiveOf,
   getWeights, saveWeight, deleteWeight, getSupplements, addSupplement, retireSupplement,
   getSupplementLogs, getSupplementLogsInRange, setSupplementTaken, getWaterLogs, addWater, deleteWater,
   electrolyteTotals, getCombos, createCombo, deleteCombo
-} from './health.js?v=13';
+} from './health.js?v=14';
 
 /* ================= utilidades de hora ================= */
 
@@ -1195,7 +1195,7 @@ function openNewFoodForm(){
     <h3><span>🍽️</span> Alimento nuevo</h3>
     <div class="field"><label>Nombre</label><input type="text" id="nf_name" placeholder="Ej: Arepa de maíz"></div>
     <div class="row-2">
-      <div class="field"><label>Categoría</label><input type="text" id="nf_cat" placeholder="Ej: Panadería"></div>
+      <div class="field"><label>Marca</label><input type="text" id="nf_brand" placeholder="opcional, ej: Savoy"></div>
       <div class="field"><label>Porción de referencia</label><input type="text" id="nf_serving" placeholder="Ej: 100 g, 1 unidad" value="100 g"></div>
     </div>
     <div class="field"><label>Peso de esa porción (g)</label><input type="number" id="nf_serving_g" inputmode="decimal" min="0" step="any" placeholder="opcional, ej: 98"></div>
@@ -1230,7 +1230,7 @@ function openNewFoodForm(){
     if(units.length && !(servingG > 0)){ showToast('Las porciones caseras necesitan el peso de la porción'); return; }
     const fields = {
       name,
-      category: card.querySelector('#nf_cat').value.trim() || null,
+      brand: card.querySelector('#nf_brand').value.trim() || null,
       serving_label: card.querySelector('#nf_serving').value.trim() || '100 g',
       serving_grams: servingG > 0 ? servingG : null,
       units,

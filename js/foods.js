@@ -1,6 +1,6 @@
-import { supabase } from './supabaseClient.js?v=13';
-import { USDA_API_KEY } from './config.js?v=13';
-import { dictQueryToEnglish, normalizeText } from './foodDict.js?v=13';
+import { supabase } from './supabaseClient.js?v=14';
+import { USDA_API_KEY } from './config.js?v=14';
+import { dictQueryToEnglish, normalizeText } from './foodDict.js?v=14';
 
 // Campos nutricionales que manejamos en toda la app, en el orden
 // en que se muestran. Un solo lugar para no desincronizar listas.
@@ -363,10 +363,13 @@ export function pickForDisplay(ranked, max = 20, caps = { generic: 12, branded: 
 
 export async function searchLocalFoods(query) {
   if (!query || query.trim().length < 2) return [];
+  // busca en el nombre o en la marca ("Savoy" encuentra tus alimentos de esa marca);
+  // fuera comas, paréntesis y asteriscos, que en el filtro "or" de Supabase son sintaxis
+  const q = query.trim().replace(/[,()*]/g, ' ');
   const { data, error } = await supabase
     .from('foods')
     .select('*')
-    .ilike('name', `%${query.trim()}%`)
+    .or(`name.ilike.*${q}*,brand.ilike.*${q}*`)
     .order('name', { ascending: true })
     .limit(15);
   if (error) throw error;

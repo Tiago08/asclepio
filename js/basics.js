@@ -3,7 +3,7 @@
 // (SR Legacy / Foundation) con su fdcId, y porciones caseras con su peso en gramos.
 // Generado con un script a partir de la API de USDA; para cambiar un valor, búscalo
 // por su fdcId en https://fdc.nal.usda.gov/ y edítalo aquí.
-import { normalizeText } from './foodDict.js?v=13';
+import { normalizeText } from './foodDict.js?v=14';
 
 // orden de los valores en cada fila (todos por 100 g)
 const FIELDS = ['kcal', 'carbs_g', 'sugars_g', 'protein_g', 'fat_g', 'sat_fat_g', 'fiber_g', 'sodium_mg',
