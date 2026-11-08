@@ -1,6 +1,6 @@
-import { supabase } from './supabaseClient.js?v=18';
-import { USDA_API_KEY } from './config.js?v=18';
-import { dictQueryToEnglish, normalizeText } from './foodDict.js?v=18';
+import { supabase } from './supabaseClient.js?v=19';
+import { USDA_API_KEY } from './config.js?v=19';
+import { dictQueryToEnglish, normalizeText } from './foodDict.js?v=19';
 
 // Campos nutricionales que manejamos en toda la app, en el orden
 // en que se muestran. Un solo lugar para no desincronizar listas.
@@ -392,7 +392,7 @@ export async function searchFavorites(userId, limit = 6) {
   // "más frecuentes" = alimentos más logueados por este usuario en food_logs
   const { data, error } = await supabase
     .from('food_logs')
-    .select('food_id, food_name_snapshot')
+    .select('food_id, food_name_snapshot, quantity')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
     .limit(200);
@@ -401,18 +401,24 @@ export async function searchFavorites(userId, limit = 6) {
   const counts = new Map();
   (data || []).forEach(r => {
     if (!r.food_id) return;
-    const prev = counts.get(r.food_id) || { count: 0, name: r.food_name_snapshot, food_id: r.food_id };
+    // la lista viene de lo más nuevo a lo más viejo: la primera vez que aparece
+    // un alimento es la última cantidad que registraste
+    const prev = counts.get(r.food_id) || { count: 0, name: r.food_name_snapshot, food_id: r.food_id,
+      last: { quantity: r.quantity, label: r.food_name_snapshot } };
     prev.count += 1;
     counts.set(r.food_id, prev);
   });
-  const topIds = [...counts.values()].sort((a, b) => b.count - a.count).slice(0, limit).map(x => x.food_id);
+  const top = [...counts.values()].sort((a, b) => b.count - a.count).slice(0, limit);
+  const topIds = top.map(x => x.food_id);
   if (topIds.length === 0) return [];
+  const lastById = new Map(top.map(x => [x.food_id, x.last]));
 
   const { data: foods, error: err2 } = await supabase.from('foods').select('*').in('id', topIds);
   if (err2) throw err2;
   // mantener el orden de frecuencia
   const byId = new Map(foods.map(f => [f.id, f]));
-  return topIds.map(id => byId.get(id)).filter(Boolean);
+  // _last: cantidad y texto de la última vez (para registrar "lo de siempre")
+  return topIds.map(id => byId.get(id)).filter(Boolean).map(f => ({ ...f, _last: lastById.get(f.id) }));
 }
 
 /** Inserta (si hace falta) una copia local de un resultado de USDA y devuelve la fila de foods. */
@@ -529,6 +535,15 @@ export async function moveFoodLog(id, momento) {
 export async function restoreFoodLog(row) {
   const { error } = await supabase.from('food_logs').insert({ ...row });
   if (error) throw error;
+}
+
+/** Copia un registro de comida a otro día y hora (para "Repetir ayer"). Devuelve la fila nueva. */
+export async function copyFoodLog(row, date, time) {
+  const { id, created_at, ...rest } = row;
+  const { data, error } = await supabase.from('food_logs')
+    .insert({ ...rest, log_date: date, log_time: time }).select().single();
+  if (error) throw error;
+  return data;
 }
 
 export async function deleteFoodLog(id) {

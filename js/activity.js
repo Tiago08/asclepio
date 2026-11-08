@@ -1,4 +1,4 @@
-import { supabase } from './supabaseClient.js?v=18';
+import { supabase } from './supabaseClient.js?v=19';
 
 export async function logActivity({ userId, type, date, time, data }) {
   const { data: row, error } = await supabase
@@ -8,6 +8,20 @@ export async function logActivity({ userId, type, date, time, data }) {
     .single();
   if (error) throw error;
   return row;
+}
+
+/** Cambia un registro ya guardado (tocar Gym o Sueño cuando ya hay uno hoy). */
+export async function updateActivityLog(id, { date, time, data }) {
+  const { error } = await supabase.from('activity_logs')
+    .update({ log_date: date, log_time: time, data }).eq('id', id);
+  if (error) throw error;
+}
+
+/** "Deshacer": vuelve a guardar un registro borrado (mismo id). e = entrada de getEntries*. */
+export async function restoreActivityLog(userId, e) {
+  const { error } = await supabase.from('activity_logs')
+    .insert({ id: e.id, user_id: userId, type: e.type, log_date: e.date, log_time: e.time, data: e.data });
+  if (error) throw error;
 }
 
 export async function deleteActivityLog(id) {

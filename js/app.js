@@ -1,21 +1,23 @@
-import { supabase } from './supabaseClient.js?v=18';
+import { supabase } from './supabaseClient.js?v=19';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js?v=18';
+} from './auth.js?v=19';
 import {
   NUTRIENT_FIELDS, MICRO_FIELDS, searchUsda, searchLocalFoods, searchFavorites, updateFood,
-  cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, moveFoodLog, restoreFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel, pluralEs
-} from './foods.js?v=18';
-import { logActivity, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking } from './activity.js?v=18';
-import { buildReportText, downloadText } from './report.js?v=18';
-import { BASICS, searchBasics } from './basics.js?v=18';
+  cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, moveFoodLog, restoreFoodLog, copyFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel, pluralEs
+} from './foods.js?v=19';
+import {
+  logActivity, updateActivityLog, restoreActivityLog, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking
+} from './activity.js?v=19';
+import { buildReportText, downloadText } from './report.js?v=19';
+import { BASICS, searchBasics } from './basics.js?v=19';
 import {
   getGoalHistory, saveGoalsFrom, goalsForDate, getBodyProfile, saveBodyProfile, suggestGoals, PACES, paceOf, objectiveOf,
   getWeights, saveWeight, deleteWeight, getSupplements, addSupplement, retireSupplement,
   getSupplementLogs, getSupplementLogsInRange, setSupplementTaken, getWaterLogs, addWater, deleteWater,
   electrolyteTotals, getCombos, createCombo, deleteCombo
-} from './health.js?v=18';
+} from './health.js?v=19';
 
 /* ================= actualización automática ================= */
 /* GitHub Pages deja guardar index.html hasta 10 min y la app instalada en el
@@ -67,28 +69,36 @@ function guessMomento(){
 /* "Cuándo" de un registro de comida: una línea ("Almuerzo · hoy 13:00") que
    se abre para cambiar comida, fecha u hora. Casi nunca cambia, así que no
    ocupa media hoja. Devuelve una función que lee lo elegido. */
-function whenHtml(momento){
+// Sin momento (gym, sueño, baño…) la línea solo dice el día y la hora.
+function whenHtml(momento, date = todayStr(), time = nowStr()){
   return `
     <div class="when-line">
       <span id="whenText"></span>
       <button class="sf-change" id="whenChangeBtn" type="button">cambiar</button>
     </div>
     <div class="when-fields hidden" id="whenFields">
-      <div class="chip-row when-meals">${MEALS.map(m => `<button type="button" class="chip${m === momento ? ' selected' : ''}" data-meal="${m}">${m}</button>`).join('')}</div>
+      ${momento ? `<div class="chip-row when-meals">${MEALS.map(m => `<button type="button" class="chip${m === momento ? ' selected' : ''}" data-meal="${m}">${m}</button>`).join('')}</div>` : ''}
       <div class="row-2">
-        <div class="field"><label>Fecha</label><input type="date" id="f_fecha" value="${todayStr()}"></div>
-        <div class="field"><label>Hora</label><input type="time" id="f_hora" value="${nowStr()}"></div>
+        <div class="field"><label>Fecha</label><input type="date" id="f_fecha" value="${escapeHtml(date)}"></div>
+        <div class="field"><label>Hora</label><input type="time" id="f_hora" value="${escapeHtml(time)}"></div>
       </div>
     </div>`;
+}
+/** "hoy", "ayer" o "mar, 3 nov" */
+function dayLabel(d){
+  if(d === todayStr()) return 'hoy';
+  if(d === daysAgoStr(1)) return 'ayer';
+  return new Date(d + 'T12:00:00').toLocaleDateString('es-VE', { weekday:'short', day:'numeric', month:'short' });
 }
 function wireWhen(card, momento){
   let meal = momento;
   const fecha = card.querySelector('#f_fecha'), hora = card.querySelector('#f_hora');
   const text = card.querySelector('#whenText');
   const paint = () => {
-    const d = fecha.value || todayStr();
-    const day = d === todayStr() ? 'hoy' : new Date(d + 'T12:00:00').toLocaleDateString('es-VE', { weekday:'short', day:'numeric', month:'short' });
-    text.innerHTML = `<b>${meal}</b> · ${day} ${escapeHtml(hora.value || nowStr())}`;
+    const day = dayLabel(fecha.value || todayStr());
+    text.innerHTML = meal
+      ? `<b>${meal}</b> · ${day} ${escapeHtml(hora.value || nowStr())}`
+      : `<b>${day.charAt(0).toUpperCase() + day.slice(1)}</b> · ${escapeHtml(hora.value || nowStr())}`;
   };
   card.querySelector('#whenChangeBtn').addEventListener('click', ev => {
     card.querySelector('#whenFields').classList.toggle('hidden');
@@ -283,7 +293,10 @@ let toastTimer = null;
 /** Aviso abajo. Con action ({ label, fn }) lleva un botón (ej. Deshacer) y dura más. */
 function showToast(msg, action){
   clearTimeout(toastTimer);
-  toastEl.textContent = msg;
+  toastEl.innerHTML = '';
+  const m = document.createElement('span');
+  m.className = 'toast-msg'; m.textContent = msg;
+  toastEl.appendChild(m);
   toastEl.classList.toggle('has-action', !!action);
   if(action){
     const b = document.createElement('button');
@@ -294,6 +307,24 @@ function showToast(msg, action){
   toastEl.classList.add('show');
   toastTimer = setTimeout(() => toastEl.classList.remove('show'), action ? 4500 : 1600);
 }
+/** Aviso con "Deshacer" para comida recién registrada: borra esas filas. */
+function undoFoodToast(msg, rows){
+  showToast(msg, { label: 'Deshacer', fn: async () => {
+    try{
+      for(const r of rows) await deleteFoodLog(r.id);
+      await refreshAfterLog();
+      showToast('Deshecho');
+    }catch(err){ showToast('Error: ' + err.message); }
+  }});
+}
+
+/** "1 taza" de "Arroz blanco cocido · 1 taza" (lo que registraste la última vez), o ''. */
+function lastAmountText(f){
+  const label = f && f._last && f._last.label;
+  if(!label || !label.includes(' · ')) return '';
+  return label.split(' · ').pop();
+}
+
 function showError(msg){
   let b = document.getElementById('errBanner');
   if(!b){
@@ -510,8 +541,12 @@ onAuthChange(handleSession);
 
 /* ================= boot ================= */
 
-async function bootApp(){
+function paintTodayDate(){
   todayDateEl.textContent = new Date().toLocaleDateString('es-VE', { weekday:'short', day:'numeric', month:'short' });
+}
+
+async function bootApp(){
+  paintTodayDate();
   renderLogActions();
   try{
     await ensureProfile(user);
@@ -563,19 +598,30 @@ async function renderFavorites(){
     // combos primero (abren su hoja para confirmar), luego tus alimentos de un toque
     const comboChips = combos.slice(0, 3).map((c, i) => `<button class="fav-chip fav-combo" data-fav-combo="${i}" type="button">🧺 ${escapeHtml(c.name)}</button>`).join('');
     if(favs.length === 0 && !comboChips){ favoritesRow.innerHTML = ''; return; }
-    favoritesRow.innerHTML = comboChips + favs.map(f => `<button class="fav-chip" data-fav="${f.id}" type="button">${escapeHtml(f.name)}</button>`).join('');
+    // cada chip registra lo de siempre: la cantidad de la última vez (ej. "1 taza")
+    favoritesRow.innerHTML = comboChips + favs.map(f => {
+      const amt = lastAmountText(f);
+      return `<button class="fav-chip" data-fav="${f.id}" type="button">${escapeHtml(f.name)}${amt ? ` <small>${escapeHtml(amt)}</small>` : ''}</button>`;
+    }).join('');
     favoritesRow.querySelectorAll('[data-fav-combo]').forEach(btn => {
       btn.addEventListener('click', () => openComboLog(combos[Number(btn.dataset.favCombo)]));
     });
     favoritesRow.querySelectorAll('[data-fav]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const food = favs.find(f => f.id === btn.dataset.fav);
+        const last = food._last;
         btn.classList.add('pulse');
+        btn.disabled = true;   // evita registrarlo dos veces con un doble toque
         try{
-          await logFood({ userId: user.id, foodRow: food, quantity: 1, momento: guessMomento(), date: todayStr(), time: nowStr() });
-          showToast(`${food.name} registrado`);
+          const momento = guessMomento();
+          const row = await logFood({
+            userId: user.id, foodRow: food, momento, date: todayStr(), time: nowStr(),
+            quantity: last && Number(last.quantity) > 0 ? Number(last.quantity) : 1,
+            label: last ? last.label : undefined
+          });
           await refreshAfterLog();
-        }catch(err){ showToast('Error: ' + err.message); }
+          undoFoodToast(`${foodLogLabel(row)} → ${mealOf(momento)}`, [row]);
+        }catch(err){ showToast('Error: ' + err.message); btn.disabled = false; }
       });
     });
   }catch(err){ /* silencioso: favoritos no son críticos */ }
@@ -583,12 +629,35 @@ async function renderFavorites(){
 
 /* ================= formulario: actividades (no-comida) ================= */
 
-function openActivityForm(typeKey){
+/** Último registro de un tipo en los últimos 14 días (para prellenar), o null. */
+function lastRecentOfType(type){
+  const list = recentEntries.filter(e => e.kind === 'activity' && e.type === type);
+  return list.length ? list[list.length - 1] : null;
+}
+
+/* existing = registro ya guardado ({ id, date, time, data }): se abre para
+   cambiarlo en vez de crear otro (tocar Gym o Sueño cuando ya hay uno hoy). */
+function openActivityForm(typeKey, existing = null){
   const t = TYPES[typeKey];
-  const data = { ...(t.base || {}) };
-  t.fields.forEach(f => {
-    if(f.default !== undefined) data[f.key] = typeof f.default === 'function' ? f.default() : f.default;
-  });
+  let data, prefillNote = '';
+  if(existing){
+    data = { ...existing.data };
+  }else{
+    data = { ...(t.base || {}) };
+    t.fields.forEach(f => {
+      if(f.default !== undefined) data[f.key] = typeof f.default === 'function' ? f.default() : f.default;
+    });
+    // casi siempre te acuestas y te levantas a la misma hora: se parte de la última vez
+    const prev = lastRecentOfType(typeKey);
+    if(typeKey === 'sueno' && prev && prev.data.horaDormir){
+      ['dejoTelefono', 'horaDormir', 'horaDespertar'].forEach(k => { if(prev.data[k]) data[k] = prev.data[k]; });
+      prefillNote = 'Con las horas de tu último registro: cámbialas si fue distinto.';
+    }
+    if(typeKey === 'gym'){
+      const lastGym = recentEntries.filter(e => e.kind === 'activity' && e.type === 'gym' && e.data.fue !== false && e.data.duracion).pop();
+      if(lastGym) data.duracion = lastGym.data.duracion;
+    }
+  }
 
   resetForm();
   const card = document.createElement('div');
@@ -596,15 +665,18 @@ function openActivityForm(typeKey){
   card.style.setProperty('--cat-color', t.color);
 
   const heading = document.createElement('h3');
-  heading.innerHTML = `<span>${t.icon}</span> ${t.label}`;
+  heading.innerHTML = `<span>${t.icon}</span> ${t.label}${existing ? ' <span class="h-note">editar</span>' : ''}`;
   card.appendChild(heading);
 
-  const rowDT = document.createElement('div');
-  rowDT.className = 'row-2';
-  rowDT.innerHTML = `
-    <div class="field"><label>Fecha</label><input type="date" id="f_fecha" value="${todayStr()}"></div>
-    <div class="field"><label>Hora</label><input type="time" id="f_hora" value="${nowStr()}"></div>`;
-  card.appendChild(rowDT);
+  // fecha y hora casi nunca cambian: una línea que se abre con "cambiar"
+  const when = document.createElement('div');
+  when.innerHTML = whenHtml(null, existing ? existing.date : todayStr(), existing ? existing.time : nowStr());
+  card.appendChild(when);
+  if(prefillNote){
+    const p = document.createElement('p');
+    p.className = 'form-hint prefill-hint'; p.textContent = prefillNote;
+    card.appendChild(p);
+  }
 
   const fieldsWrap = document.createElement('div');
   card.appendChild(fieldsWrap);
@@ -698,27 +770,38 @@ function openActivityForm(typeKey){
   }
   renderFields();
 
+  const saveLabel = existing ? 'Guardar cambios' : 'Guardar';
   const actions = document.createElement('div');
-  actions.className = 'form-actions';
-  actions.innerHTML = `<button class="btn-ghost" id="cancelBtn">Cancelar</button><button class="btn-primary" id="saveBtn">Guardar</button>`;
-  card.appendChild(actions);
+  actions.className = 'form-actions sticky';
+  actions.innerHTML = `<button class="btn-ghost" id="cancelBtn">Cancelar</button><button class="btn-primary" id="saveBtn">${saveLabel}</button>`;
 
-  if(t.restAction){
+  // "día de descanso" / "no fui": no tiene sentido si ya es eso lo que está guardado
+  const showRest = t.restAction && !(existing && existing.data.fue === false);
+  if(showRest){
     const rest = document.createElement('button');
     rest.className = 'btn-link'; rest.type = 'button'; rest.id = 'restBtn';
     rest.textContent = t.restAction.label;
     card.appendChild(rest);
   }
+  if(existing){
+    const del = document.createElement('button');
+    del.className = 'btn-link btn-danger-link'; del.type = 'button'; del.id = 'deleteEntryBtn';
+    del.textContent = 'Eliminar este registro';
+    card.appendChild(del);
+  }
+  // los botones fijos van al final: si quedan antes de un enlace, lo tapan
+  card.appendChild(actions);
   formArea.appendChild(card);
+  const readWhen = wireWhen(card, null);
 
   async function persist(payload, button, idleLabel){
-    const fecha = document.getElementById('f_fecha').value || todayStr();
-    const hora = document.getElementById('f_hora').value || nowStr();
+    const { date, time } = readWhen();
     button.disabled = true; button.textContent = 'Guardando...';
     try{
-      await logActivity({ userId: user.id, type: typeKey, date: fecha, time: hora, data: payload });
+      if(existing) await updateActivityLog(existing.id, { date, time, data: payload });
+      else await logActivity({ userId: user.id, type: typeKey, date, time, data: payload });
       closeForm();
-      showToast('Guardado');
+      showToast(existing ? 'Cambios guardados' : 'Guardado');
       await refreshAfterLog();
     }catch(err){
       showToast('Error: ' + err.message);
@@ -734,14 +817,39 @@ function openActivityForm(typeKey){
         showToast(`Falta: ${f.label}`); return;
       }
     }
-    const payload = t.finalize ? t.finalize(data) : { ...data };
-    await persist(payload, ev.currentTarget, 'Guardar');
+    // "Guardar" (no el descanso) siempre es "sí fui", aunque antes dijera descanso
+    const full = { ...data, ...(t.base || {}) };
+    const payload = t.finalize ? t.finalize(full) : full;
+    await persist(payload, ev.currentTarget, saveLabel);
   });
-  if(t.restAction){
+  if(showRest){
     card.querySelector('#restBtn').addEventListener('click', (ev) => {
       persist({ ...t.restAction.data }, ev.currentTarget, t.restAction.label);
     });
   }
+  if(existing){
+    card.querySelector('#deleteEntryBtn').addEventListener('click', () => {
+      dismissSheet();
+      removeActivityWithUndo({ ...existing, kind: 'activity', type: typeKey });
+    });
+  }
+}
+
+/** Borra un registro de gym, sueño, baño, energía o nota, con "Deshacer". */
+async function removeActivityWithUndo(e){
+  try{ await deleteActivityLog(e.id); }
+  catch(err){ showToast('Error: ' + err.message); return; }
+  await afterChange();
+  showToast('Eliminado', { label: 'Deshacer', fn: async () => {
+    try{ await restoreActivityLog(user.id, e); await afterChange(); showToast('Recuperado'); }
+    catch(err){ showToast('Error: ' + err.message); }
+  }});
+}
+
+/** Después de borrar o recuperar: Hoy y, si está abierto, el Historial. */
+async function afterChange(){
+  await refreshAfterLog();
+  if(document.getElementById('panel-historial').classList.contains('active')) await renderHistory();
 }
 
 /* ================= formulario: comida ================= */
@@ -835,6 +943,8 @@ function openFoodForm(momento){
     if(q.length < 2){ foodSearchSeq++; renderRecentFoods(resultsWrap); return; }
     debounceTimer = setTimeout(() => runFoodSearch(q, resultsWrap), 250);
   });
+  // "Buscar" del teclado: lo esconde para ver todos los resultados
+  input.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); input.blur(); } });
 
   input.focus();
 }
@@ -980,6 +1090,16 @@ async function openQuantityStep(foodResult){
   const f = withUnits(foodResult);
   const units = unitOptions(f);
   let unit = units[0];
+  // lo de siempre: si ya lo registraste, arranca con la misma cantidad y unidad
+  let startAmount = unit.def;
+  const last = f._last || (usedFoods.find(u => u.id && u.id === f.id) || {})._last;
+  if(last){
+    const amt = lastAmountText({ _last: last });
+    const n = parseFloat(amt);
+    const hit = amt && n > 0 ? units.find(u => amountLabel(u, n) === amt) : null;
+    if(hit){ unit = hit; startAmount = n; }
+    else if(!amt && Number(last.quantity) > 0 && units[0].grams == null){ startAmount = Math.round(Number(last.quantity) * 100) / 100; }
+  }
   const momento = pendingMomento || guessMomento();
   const inCombo = !!comboDraft;
   const canEditUnits = f.source === 'custom' && f.id;
@@ -994,9 +1114,9 @@ async function openQuantityStep(foodResult){
     <div class="field">
       <label>Cantidad</label>
       <div class="qty-row">
-        <input type="number" id="f_qty" value="${unit.def}" min="0" step="any" inputmode="decimal">
+        <input type="number" id="f_qty" value="${startAmount}" min="0" step="any" inputmode="decimal">
         <div class="chip-row unit-chips">
-          ${units.map((u, i) => `<button type="button" class="chip${i === 0 ? ' selected' : ''}" data-unit="${i}">${escapeHtml(u.label)}${u.grams && u.label !== 'g' ? ` <span class="chip-g">${Math.round(u.grams)} g</span>` : ''}</button>`).join('')}
+          ${units.map((u, i) => `<button type="button" class="chip${u === unit ? ' selected' : ''}" data-unit="${i}">${escapeHtml(u.label)}${u.grams && u.label !== 'g' ? ` <span class="chip-g">${Math.round(u.grams)} g</span>` : ''}</button>`).join('')}
         </div>
       </div>
     </div>
@@ -1031,6 +1151,9 @@ async function openQuantityStep(foodResult){
     });
   });
   qtyInput.addEventListener('input', updateCalc);
+  // al tocar el número se selecciona entero: escribes encima sin borrar
+  qtyInput.addEventListener('focus', () => setTimeout(() => qtyInput.select(), 0));
+  qtyInput.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); qtyInput.blur(); } });
   updateCalc();
 
   card.querySelector('#changeFoodBtn').addEventListener('click', openFoodForm);
@@ -1052,15 +1175,16 @@ async function openQuantityStep(foodResult){
         openComboBuilder();
         return;
       }
-      await logFood({
+      const when = readWhen();
+      const row = await logFood({
         userId: user.id, foodRow,
         quantity: quantityFor(f, unit, amount),
         label: `${foodRow.name} · ${amountLabel(unit, amount)}`,
-        ...readWhen()
+        ...when
       });
       closeForm();
-      showToast('Comida registrada');
       await refreshAfterLog();
+      undoFoodToast(`Registrado en ${when.momento}${when.date === todayStr() ? '' : ' (' + dayLabel(when.date) + ')'}`, [row]);
     }catch(err){
       showToast('Error: ' + err.message);
       saveBtn.disabled = false; saveBtn.textContent = idleLabel;
@@ -1197,11 +1321,11 @@ function openComboLog(combo){
         <span class="ci-right mono">${it.food.kcal != null ? Math.round(it.food.kcal * it.quantity) + ' kcal' : ''}</span></div>`).join('')}</div>
     <div class="calc-box"><b>${Math.round(comboKcal(combo))} kcal</b> en total</div>
     ${whenHtml(momento)}
+    <button class="btn-link" id="delComboBtn" type="button">Eliminar este combo</button>
     <div class="form-actions sticky">
       <button class="btn-ghost" id="cancelBtn">Volver</button>
       <button class="btn-primary" id="saveBtn">Registrar combo</button>
-    </div>
-    <button class="btn-link" id="delComboBtn" type="button">Eliminar este combo</button>`;
+    </div>`;
   formArea.appendChild(card);
   card.querySelector('#cancelBtn').addEventListener('click', openFoodForm);
   const readWhen = wireWhen(card, momento);
@@ -1221,15 +1345,16 @@ function openComboLog(combo){
     btn.disabled = true; btn.textContent = 'Guardando...';
     const common = { userId: user.id, ...readWhen() };
     let done = 0;
+    const rows = [];
     try{
       // uno por uno: si falla a la mitad, se sabe cuántos quedaron
       for(const it of combo.items){
-        await logFood({ ...common, foodRow: withUnits(it.food), quantity: Number(it.quantity), label: it.label });
+        rows.push(await logFood({ ...common, foodRow: withUnits(it.food), quantity: Number(it.quantity), label: it.label }));
         done++;
       }
       closeForm();
-      showToast(`${combo.name} registrado`);
       await refreshAfterLog();
+      undoFoodToast(`${combo.name} registrado`, rows);
     }catch(err){
       showToast(`Error tras ${done} de ${combo.items.length}: ${err.message}`);
       btn.disabled = false; btn.textContent = 'Registrar combo';
@@ -1265,22 +1390,32 @@ function openQuickAddForm(){
   formArea.appendChild(card);
   card.querySelector('#cancelBtn').addEventListener('click', openFoodForm);
   const readWhen = wireWhen(card, momento);
+  const num = id => { const v = card.querySelector(id).value; return v === '' ? null : Number(v); };
+  // sin kcal pero con macros: 4 kcal por g de proteína y carbos, 9 por g de grasa
+  const macroKcal = () => {
+    const p = num('#qa_protein'), c = num('#qa_carbs'), g = num('#qa_fat');
+    if(p == null && c == null && g == null) return null;
+    return Math.round((p || 0) * 4 + (c || 0) * 4 + (g || 0) * 9);
+  };
+  ['#qa_protein', '#qa_carbs', '#qa_fat'].forEach(id => card.querySelector(id).addEventListener('input', () => {
+    const k = macroKcal();
+    card.querySelector('#qa_kcal').placeholder = k != null ? `≈ ${k} (por los macros)` : '';
+  }));
   card.querySelector('#saveBtn').addEventListener('click', async () => {
-    const num = id => { const v = card.querySelector(id).value; return v === '' ? null : Number(v); };
-    const kcal = num('#qa_kcal');
-    if(kcal == null || kcal < 0){ showToast('Escribe las calorías'); return; }
+    const kcal = num('#qa_kcal') ?? macroKcal();
+    if(kcal == null || kcal < 0){ showToast('Escribe las calorías (o los macros)'); return; }
     const foodRow = { id: null, name: card.querySelector('#qa_name').value.trim() || 'Agregado rápido' };
     NUTRIENT_FIELDS.forEach(nf => { foodRow[nf.key] = null; });
     Object.assign(foodRow, { kcal, protein_g: num('#qa_protein'), carbs_g: num('#qa_carbs'), fat_g: num('#qa_fat') });
     const saveBtn = card.querySelector('#saveBtn');
     saveBtn.disabled = true; saveBtn.textContent = 'Guardando...';
     try{
-      await logFood({
+      const row = await logFood({
         userId: user.id, foodRow, quantity: 1, ...readWhen()
       });
       closeForm();
-      showToast('Comida registrada');
       await refreshAfterLog();
+      undoFoodToast('Comida registrada', [row]);
     }catch(err){
       showToast('Error: ' + err.message);
       saveBtn.disabled = false; saveBtn.textContent = 'Guardar';
@@ -1387,7 +1522,11 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 
 /* ================= timeline ================= */
 
+// registros dibujados en Hoy o Historial, por id: para borrar con "Deshacer"
+const shownEntries = new Map();
+
 function entryRow(e){
+  shownEntries.set(e.id, e);
   const color = CAT_COLOR[e.kind === 'food' ? 'comida' : e.type];
   const label = CAT_LABEL[e.kind === 'food' ? 'comida' : e.type];
   let summary = '';
@@ -1399,15 +1538,18 @@ function entryRow(e){
     summary = escapeHtml(t ? t.summary(e.data) : '');
   }
   const delAttr = e.kind === 'food' ? `data-del-food="${e.id}"` : `data-del-activity="${e.id}"`;
+  const editAttr = e.kind === 'activity' && TYPES[e.type] ? ` data-edit-activity="${e.id}" role="button" tabindex="0"` : '';
   return `
-    <div class="entry" style="--cat-color:${color}">
+    <div class="entry${editAttr ? ' is-editable' : ''}" style="--cat-color:${color}"${editAttr}>
       <button class="entry-del" ${delAttr} aria-label="Eliminar">eliminar</button>
       <div class="entry-top"><span class="entry-time mono">${e.time}</span><span class="entry-type">${label}</span></div>
       <div class="entry-summary">${summary}</div>
     </div>`;
 }
 
+let todayFoods = [];     // comida de hoy (entradas), para volver a dibujar las comidas
 let todayEntries = [];   // registros de hoy (comida y actividades), para los mosaicos
+let recentEntries = [];  // últimos 14 días: prellenar formularios y "Repetir ayer"
 
 async function renderToday(){
   const wrap = document.getElementById('todayTimeline');
@@ -1420,6 +1562,7 @@ async function renderToday(){
       ? `<div class="timeline">${others.map(entryRow).join('')}</div>`
       : `<div class="search-empty">Baño, energía y notas aparecerán aquí.</div>`;
     const foods = list.filter(e => e.kind === 'food');
+    todayFoods = foods;
     todayFoodRows = foods.map(e => e.data);
     renderRings(foods);
     renderMeals(foods);
@@ -1438,15 +1581,25 @@ async function renderToday(){
 const mealList = document.getElementById('mealList');
 const MEAL_ICON = { Desayuno: '☕', Almuerzo: '🍛', Merienda: '🍎', Cena: '🌙' };
 
+/** Lo que comiste ayer en esa comida (para "Repetir ayer"). */
+function yesterdayMeal(m){
+  const y = daysAgoStr(1);
+  return recentEntries.filter(e => e.kind === 'food' && e.date === y && mealOf(e.data.momento) === m);
+}
+
 function renderMeals(foods){
   mealList.innerHTML = MEALS.map(m => {
     const items = foods.filter(e => mealOf(e.data.momento) === m);
     const kcal = items.reduce((s, e) => s + (e.data.kcal != null ? Number(e.data.kcal) : 0), 0);
+    // comida vacía hoy pero no ayer: un toque copia lo de ayer (como el desayuno de siempre)
+    const prev = items.length ? [] : yesterdayMeal(m);
+    const prevKcal = prev.reduce((s, e) => s + (e.data.kcal != null ? Number(e.data.kcal) : 0), 0);
     return `
       <div class="meal${items.length ? '' : ' is-empty'}">
         <div class="meal-h">
           <span class="meal-name"><span aria-hidden="true">${MEAL_ICON[m]}</span> ${m}</span>
           ${items.length ? `<span class="meal-kcal mono">${Math.round(kcal)} kcal</span>` : ''}
+          ${prev.length ? `<button class="meal-repeat" data-repeat-meal="${m}" type="button" aria-label="Repetir lo de ayer en ${m}: ${prev.length} alimento${prev.length === 1 ? '' : 's'}, ${Math.round(prevKcal)} kcal">↻ Repetir ayer</button>` : ''}
           <button class="meal-add" data-add-meal="${m}" type="button" aria-label="Agregar a ${m}">+</button>
         </div>
         ${items.length ? `<div class="meal-items">${items.map(e => `
@@ -1462,6 +1615,7 @@ function renderMeals(foods){
       </div>`;
   }).join('');
   mealList.querySelectorAll('[data-add-meal]').forEach(b => b.addEventListener('click', () => openFoodForm(b.dataset.addMeal)));
+  mealList.querySelectorAll('[data-repeat-meal]').forEach(b => b.addEventListener('click', () => repeatYesterday(b.dataset.repeatMeal, b)));
   mealList.querySelectorAll('[data-move-food]').forEach(b => b.addEventListener('click', () => {
     const entry = foods.find(e => e.id === b.dataset.moveFood);
     if(entry) openMoveFood(entry.data);
@@ -1470,6 +1624,24 @@ function renderMeals(foods){
     const entry = foods.find(e => e.id === row.dataset.foodRow);
     if(entry) enableSwipeDelete(row, () => removeFoodWithUndo(entry.data, row));
   });
+}
+
+/** Copia a hoy, a esta hora, lo que comiste ayer en esa comida. */
+async function repeatYesterday(m, btn){
+  const prev = yesterdayMeal(m);
+  if(!prev.length) return;
+  btn.disabled = true;
+  const rows = [];
+  try{
+    const time = nowStr();
+    for(const e of prev) rows.push(await copyFoodLog(e.data, todayStr(), time));
+    await refreshAfterLog();
+    undoFoodToast(`${m} de ayer: ${rows.length} alimento${rows.length === 1 ? '' : 's'}`, rows);
+  }catch(err){
+    showToast('Error: ' + err.message);
+    btn.disabled = false;
+    if(rows.length) await refreshAfterLog();
+  }
 }
 
 /** Borra un registro de comida y ofrece "Deshacer" (lo vuelve a guardar tal cual). */
@@ -1481,9 +1653,9 @@ async function removeFoodWithUndo(row, rowEl){
     if(rowEl) resetSwipe(rowEl, true);
     return;
   }
-  await refreshAfterLog();
+  await afterChange();
   showToast('Eliminado', { label: 'Deshacer', fn: async () => {
-    try{ await restoreFoodLog(row); await refreshAfterLog(); showToast('Recuperado'); }
+    try{ await restoreFoodLog(row); await afterChange(); showToast('Recuperado'); }
     catch(err){ showToast('Error: ' + err.message); }
   }});
 }
@@ -1737,12 +1909,13 @@ function renderDaily(){
   dayTiles.querySelector('#waterPlusBtn').addEventListener('click', async (ev) => {
     const btn = ev.currentTarget;
     btn.disabled = true;
-    await quickWater(250);
+    await quickWater(250, true);
     btn.disabled = false;
   });
   dayTiles.querySelector('#tileSupps').addEventListener('click', openSupplementsForm);
-  dayTiles.querySelector('#tileGym').addEventListener('click', () => openActivityForm('gym'));
-  dayTiles.querySelector('#tileSleep').addEventListener('click', () => openActivityForm('sueno'));
+  // uno por día: si ya está, tocarlo lo abre para cambiarlo (no crea otro)
+  dayTiles.querySelector('#tileGym').addEventListener('click', () => openActivityForm('gym', lastOfType('gym')));
+  dayTiles.querySelector('#tileSleep').addEventListener('click', () => openActivityForm('sueno', lastOfType('sueno')));
   dayTiles.querySelector('#tileBano').addEventListener('click', () => openActivityForm('bano'));
   dayTiles.querySelector('#tileEnergia').addEventListener('click', () => openActivityForm('energia'));
 }
@@ -1771,11 +1944,21 @@ function openOtherLogPicker(){
 
 /* ---- agua ---- */
 
-async function quickWater(ml){
+async function quickWater(ml, withUndo = false){
   try{
     const row = await addWater(user.id, { date: todayStr(), time: nowStr(), ml });
     waterToday.push(row);
-    showToast(`+${ml} ml · ${fmtLiters(waterTotal())} L hoy`);
+    const msg = `+${ml} ml · ${fmtLiters(waterTotal())} L hoy`;
+    if(withUndo){
+      showToast(msg, { label: 'Deshacer', fn: async () => {
+        try{
+          await deleteWater(row.id);
+          waterToday = waterToday.filter(w => w.id !== row.id);
+          renderDaily();
+          showToast(`−${ml} ml`);
+        }catch(err){ showToast('Error: ' + err.message); }
+      }});
+    }else showToast(msg);
     renderDaily();
     return true;
   }catch(err){ showToast('Error: ' + err.message); return false; }
@@ -1882,7 +2065,8 @@ function openSupplementsForm(){
         <span class="check-box" aria-hidden="true">${takenToday.has(s.id) ? '✓' : ''}</span>
         <span class="check-name">${escapeHtml(s.name)}</span>
         ${s.dose ? `<span class="check-dose">${escapeHtml(s.dose)}</span>` : ''}
-      </button>`).join('')}</div>`}
+      </button>`).join('')}</div>
+    ${supplements.length >= 2 && supplements.some(s => !takenToday.has(s.id)) ? '<button class="chip all-btn" id="allSuppBtn" type="button">✓ Marcar todos</button>' : ''}`}
     <details class="more-fields" id="suppEdit"${empty ? ' open' : ''}>
       <summary>${empty ? 'Tu pila' : 'Editar tu pila'}</summary>
       ${empty ? '' : `<div class="combo-items" style="margin-top:8px">${supplements.map(s => `
@@ -1918,6 +2102,16 @@ function openSupplementsForm(){
       showToast('Error: ' + err.message);
     }
   }));
+  card.querySelector('#allSuppBtn')?.addEventListener('click', async (ev) => {
+    ev.currentTarget.disabled = true;
+    const pending = supplements.filter(s => !takenToday.has(s.id));
+    try{
+      for(const s of pending){ await setSupplementTaken(user.id, s.id, todayStr(), true); takenToday.add(s.id); }
+      showToast('Suplementos de hoy listos');
+    }catch(err){ showToast('Error: ' + err.message); }
+    renderDaily();
+    openSupplementsForm();
+  });
   card.querySelectorAll('[data-retire]').forEach(b => b.addEventListener('click', async () => {
     try{
       await retireSupplement(b.dataset.retire);
@@ -1973,16 +2167,32 @@ async function renderHistory(){
   }
 }
 
-document.addEventListener('click', async (e) => {
-  const delFood = e.target.getAttribute && e.target.getAttribute('data-del-food');
-  const delActivity = e.target.getAttribute && e.target.getAttribute('data-del-activity');
-  if(delFood){
-    try{ await deleteFoodLog(delFood); showToast('Eliminado'); await refreshAfterLog(); await renderHistory(); }
-    catch(err){ showToast('Error: ' + err.message); }
-  } else if(delActivity){
-    try{ await deleteActivityLog(delActivity); showToast('Eliminado'); await refreshAfterLog(); await renderHistory(); }
-    catch(err){ showToast('Error: ' + err.message); }
+document.addEventListener('click', async (ev) => {
+  const t = ev.target.closest && ev.target.closest('[data-del-food], [data-del-activity]');
+  if(!t) return;
+  const e = shownEntries.get(t.dataset.delFood || t.dataset.delActivity);
+  if(!e) return;
+  t.disabled = true;
+  if(e.kind === 'food'){
+    try{ await deleteFoodLog(e.id); }
+    catch(err){ showToast('Error: ' + err.message); t.disabled = false; return; }
+    await afterChange();
+    showToast('Eliminado', { label: 'Deshacer', fn: async () => {
+      try{ await restoreFoodLog(e.data); await afterChange(); showToast('Recuperado'); }
+      catch(err){ showToast('Error: ' + err.message); }
+    }});
+  }else{
+    await removeActivityWithUndo(e);
   }
+});
+
+// tocar un registro de gym, sueño, baño, energía o nota lo abre para cambiarlo
+document.addEventListener('click', ev => {
+  if(ev.target.closest && ev.target.closest('.entry-del')) return;
+  const row = ev.target.closest && ev.target.closest('[data-edit-activity]');
+  if(!row) return;
+  const e = shownEntries.get(row.dataset.editActivity);
+  if(e) openActivityForm(e.type, e);
 });
 
 /* ================= ranking ================= */
@@ -2070,7 +2280,8 @@ function renderRings(foodEntries){
     ['kcal','protein_g','carbs_g','fat_g'].forEach(k => { if(d[k] != null) totals[k] += Number(d[k]); });
   });
   const g = goalsFor(todayStr());
-  const left = Math.max(0, Math.round(g.goal_kcal - totals.kcal));
+  const diff = Math.round(g.goal_kcal) - Math.round(totals.kcal);
+  const over = diff < 0;
   const macros = [
     { key:'carbs_g', label:'Carbos', color:'var(--c-comida)', goal: g.goal_carbs_g },
     { key:'protein_g', label:'Proteína', color:'var(--c-gym)', goal: g.goal_protein_g },
@@ -2081,9 +2292,9 @@ function renderRings(foodEntries){
     <div class="today-card">
       <div class="kh-top">
         <span class="kh-label">Calorías</span>
-        <span class="kh-num"><b>${Math.round(totals.kcal)}</b> / ${Math.round(g.goal_kcal)} · ${left} restantes</span>
+        <span class="kh-num"><b>${Math.round(totals.kcal)}</b> / ${Math.round(g.goal_kcal)} · ${over ? `<span class="kh-over">${-diff} de más</span>` : `${diff} restantes`}</span>
       </div>
-      <div class="kh-bar"><div class="kh-bar-fill" style="width:${pctWidth(totals.kcal, g.goal_kcal)}"></div></div>
+      <div class="kh-bar"><div class="kh-bar-fill${over ? ' is-over' : ''}" style="width:${pctWidth(totals.kcal, g.goal_kcal)}"></div></div>
       <div class="macro-row">
         ${macros.map(m => `
           <div class="macro-item">
@@ -2099,6 +2310,8 @@ function renderRings(foodEntries){
 async function renderStats(){
   try{
     const list = await getEntriesInRange(user.id, daysAgoStr(13), todayStr());
+    recentEntries = list;
+    renderMeals(todayFoods);   // ya se sabe qué comiste ayer: aparece "Repetir ayer"
     await renderInsight(list);
   }catch(err){ insightArea.innerHTML = ''; }
 }
@@ -2161,13 +2374,16 @@ async function reloadDailyIfNewDay(){
   const today = todayStr();
   if(dailyFor === today) return false;
   dailyFor = today;
+  paintTodayDate();
   try{
     [waterToday, takenToday] = await Promise.all([getWaterLogs(user.id, today), getSupplementLogs(user.id, today)]);
   }catch(err){ waterToday = []; takenToday = new Set(); }
   return true;
 }
 document.addEventListener('visibilitychange', async () => {
-  if(document.visibilityState === 'visible' && user && await reloadDailyIfNewDay()) await renderToday();
+  if(document.visibilityState === 'visible' && user && await reloadDailyIfNewDay()){
+    await Promise.all([renderToday(), renderStats(), renderFavorites()]);
+  }
 });
 
 async function refreshAfterLog(){
@@ -2378,6 +2594,7 @@ document.getElementById('saveWeightBtn').addEventListener('click', async () => {
     const row = await saveWeight(user.id, todayStr(), kg);
     weights = [row, ...weights.filter(w => w.log_date !== row.log_date)];
     document.getElementById('weightInput').value = '';
+    document.getElementById('weightInput').blur();
     document.getElementById('bodyWeight').value = String(kg).replace('.', ',');
     renderWeights();
     renderSuggestion();
@@ -2385,9 +2602,13 @@ document.getElementById('saveWeightBtn').addEventListener('click', async () => {
   }catch(err){ showToast('Error: ' + err.message); }
 });
 
+document.getElementById('weightInput').addEventListener('keydown', e => {
+  if(e.key === 'Enter'){ e.preventDefault(); document.getElementById('saveWeightBtn').click(); }
+});
+
 document.getElementById('saveNameBtn').addEventListener('click', async () => {
   const val = document.getElementById('displayNameInput').value.trim();
-  if(!val) return;
+  if(!val){ showToast('Escribe un nombre'); return; }
   try{
     await updateDisplayName(user.id, val);
     profile.display_name = val;
@@ -2397,7 +2618,7 @@ document.getElementById('saveNameBtn').addEventListener('click', async () => {
 
 /* ================= reporte ================= */
 
-document.getElementById('reportBtn').addEventListener('click', async () => {
+async function buildReport(){
   const range = document.getElementById('reportRange').value;
   const to = todayStr();
   const from = range === 'week' ? daysAgoStr(6) : to;
@@ -2413,8 +2634,29 @@ document.getElementById('reportBtn').addEventListener('click', async () => {
       displayName: profile.display_name, fromDate: from, toDate: to, entries, goalsFor,
       water, suppLogs, suppNames, weights: weights.filter(w => w.log_date >= from && w.log_date <= to)
     });
-    downloadText(`asclepio-${profile.display_name}-${to}.txt`, text);
-  }catch(err){ showToast('Error generando reporte: ' + err.message); }
+    return { text, filename: `asclepio-${profile.display_name}-${to}.txt` };
+  }catch(err){ showToast('Error generando reporte: ' + err.message); return null; }
+}
+
+/* En el iPhone, descargar un .txt desde la app instalada es incómodo: se
+   abre el menú de compartir (WhatsApp, Notas, copiar...). Sin ese menú
+   (computadora) se copia al portapapeles; si tampoco, se descarga. */
+document.getElementById('reportBtn').addEventListener('click', async (ev) => {
+  const btn = ev.currentTarget;
+  btn.disabled = true;
+  const r = await buildReport();
+  btn.disabled = false;
+  if(!r) return;
+  if(navigator.share){
+    try{ await navigator.share({ title: 'Reporte de Asclepio', text: r.text }); return; }
+    catch(err){ if(err.name === 'AbortError') return; }
+  }
+  try{ await navigator.clipboard.writeText(r.text); showToast('Reporte copiado: pégalo en el chat'); }
+  catch(err){ downloadText(r.filename, r.text); }
+});
+document.getElementById('reportDownloadBtn').addEventListener('click', async () => {
+  const r = await buildReport();
+  if(r) downloadText(r.filename, r.text);
 });
 
 /* ================= arranque ================= */

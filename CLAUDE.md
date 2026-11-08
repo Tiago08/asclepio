@@ -26,11 +26,14 @@ Estado y pendientes: página "Asclepio" en Notion (https://app.notion.com/p/40d4
 - Baño "no fui hoy" se guarda como `activity_logs` tipo `bano` con `data.fue = false` (igual que el descanso de Gym).
 - Comidas: Desayuno, Almuerzo, Merienda, Cena (`MEALS` en `app.js`). "Snack" es el nombre viejo de Merienda: se acepta en la tabla y se muestra como Merienda. Hoy agrupa la comida por estas cuatro.
 - Objetivo de peso: ritmo en kg/semana (`pace_kg_week` en `body_profiles`, `PACES` en `health.js`); 1 kg ≈ 7700 kcal y nunca por debajo del gasto en reposo ni de 1500/1200 kcal.
+- Gym y Sueño son uno por día: tocar el mosaico con registro lo abre para editar (no crea otro). Los registros de "Otros" e Historial se tocan para editar. Todo borrado y todo registro de comida ofrece "Deshacer" en el aviso.
+- Frecuentes: `searchFavorites` trae `_last` (cantidad y texto de la última vez); el chip registra eso y el paso de cantidad arranca igual. Comida vacía hoy que ayer tuvo algo muestra "↻ Repetir ayer" (usa `recentEntries`, los últimos 14 días).
+- En las hojas, los botones fijos (`form-actions sticky`) van siempre al final: un enlace debajo queda tapado.
 - `sql/`: esquema y migraciones que Santiago ejecuta a mano en el SQL Editor de Supabase.
 
 ## Reglas de trabajo
 
-- Cache-busting: los imports y el CSS llevan `?v=N` (ahora `?v=18`). Cada vez que cambies archivos, sube N en todos los imports, en `index.html` y en `supabaseClient.js`. Si no, Chrome y la app instalada muestran archivos viejos. Además `app.js` compara su `?v` con el del `index.html` publicado al abrir o volver a la app y se recarga solo si hay versión nueva (por eso el `?v` de `app.js` en `index.html` siempre debe subir).
+- Cache-busting: los imports y el CSS llevan `?v=N` (ahora `?v=19`). Cada vez que cambies archivos, sube N en todos los imports, en `index.html` y en `supabaseClient.js`. Si no, Chrome y la app instalada muestran archivos viejos. Además `app.js` compara su `?v` con el del `index.html` publicado al abrir o volver a la app y se recarga solo si hay versión nueva (por eso el `?v` de `app.js` en `index.html` siempre debe subir).
 - Todo el texto visible va en español.
 - Los cambios de base de datos van siempre en un archivo nuevo en `sql/`, idempotente (`if not exists`, `on conflict`, etc.). Nunca edites el esquema ya ejecutado. Al terminar, di a Santiago qué archivo ejecutar y en qué orden.
 - Tablas creadas por SQL necesitan `GRANT` a `authenticated` además de las políticas RLS (ya nos mordió: "permission denied for table").

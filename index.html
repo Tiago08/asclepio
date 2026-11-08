@@ -15,20 +15,20 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/styles.css?v=18">
+<link rel="stylesheet" href="css/styles.css?v=19">
 <!-- Precarga en paralelo: sin esto el navegador descubre cada módulo
      solo después de bajar el anterior (una cascada en serie). -->
 <link rel="modulepreload" href="https://esm.sh/@supabase/supabase-js@2.119.0/es2022/supabase-js.bundle.mjs" crossorigin>
-<link rel="modulepreload" href="js/app.js?v=18">
-<link rel="modulepreload" href="js/supabaseClient.js?v=18">
-<link rel="modulepreload" href="js/config.js?v=18">
-<link rel="modulepreload" href="js/auth.js?v=18">
-<link rel="modulepreload" href="js/foods.js?v=18">
-<link rel="modulepreload" href="js/foodDict.js?v=18">
-<link rel="modulepreload" href="js/basics.js?v=18">
-<link rel="modulepreload" href="js/activity.js?v=18">
-<link rel="modulepreload" href="js/report.js?v=18">
-<link rel="modulepreload" href="js/health.js?v=18">
+<link rel="modulepreload" href="js/app.js?v=19">
+<link rel="modulepreload" href="js/supabaseClient.js?v=19">
+<link rel="modulepreload" href="js/config.js?v=19">
+<link rel="modulepreload" href="js/auth.js?v=19">
+<link rel="modulepreload" href="js/foods.js?v=19">
+<link rel="modulepreload" href="js/foodDict.js?v=19">
+<link rel="modulepreload" href="js/basics.js?v=19">
+<link rel="modulepreload" href="js/activity.js?v=19">
+<link rel="modulepreload" href="js/report.js?v=19">
+<link rel="modulepreload" href="js/health.js?v=19">
 </head>
 <body>
 
@@ -159,12 +159,13 @@
 
     <div class="data-card">
       <h4>Reporte</h4>
-      <p>Genera un resumen de texto de tu día o semana — pásamelo para que te diga qué ajustar.</p>
+      <p>Un resumen de texto de tu día o semana — pásamelo para que te diga qué ajustar.</p>
       <select id="reportRange">
         <option value="today">Hoy</option>
         <option value="week">Últimos 7 días</option>
       </select>
-      <button class="btn-primary" id="reportBtn" style="--cat-color: var(--accent)">Generar y descargar reporte</button>
+      <button class="btn-primary" id="reportBtn" style="--cat-color: var(--accent)">Compartir reporte</button>
+      <button class="btn-link" id="reportDownloadBtn" type="button">o descargarlo como .txt</button>
     </div>
   </div>
 </div>
@@ -199,6 +200,6 @@
     }
   })();
 </script>
-<script type="module" src="js/app.js?v=18"></script>
+<script type="module" src="js/app.js?v=19"></script>
 </body>
 </html>

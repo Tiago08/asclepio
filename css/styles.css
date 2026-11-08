@@ -655,3 +655,28 @@ header{
 .rank-info-list .mono{ margin-left: auto; color: var(--text); font-size: 12px; text-align: right; }
 /* el botón rojo solo se puede tocar cuando la fila quedó abierta */
 .swipe-row.is-open .swipe-del{ pointer-events: auto; }
+
+/* ---------- comodidades ---------- */
+/* el aviso nunca se sale de la pantalla: el texto largo se corta con "…" */
+.toast{ max-width: calc(100vw - 32px); }
+.toast-msg{ display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* chip de frecuente: la cantidad que registra ("1 taza") */
+.fav-chip small{ color: var(--text-faint); font-size: 11.5px; margin-left: 3px; }
+.fav-chip:disabled{ opacity: 0.6; }
+/* calorías pasadas de la meta */
+.kh-over{ color: var(--danger); }
+.kh-bar-fill.is-over{ background: var(--danger); }
+/* comida vacía hoy que ayer sí tuvo algo */
+.meal-repeat{
+  flex: none; background: none; border: none; color: var(--c-comida); font-size: 12.5px;
+  padding: 10px 4px; border-radius: 8px; white-space: nowrap;
+}
+.meal-repeat:active{ background: var(--surface-sunken); }
+.meal-repeat:disabled{ opacity: 0.5; }
+.h-note{ font-size: 12px; font-weight: 400; color: var(--text-faint); }
+.prefill-hint{ margin: 0 0 12px; }
+/* registros de "Otros" e Historial: se tocan para cambiarlos */
+.entry.is-editable{ cursor: pointer; border-radius: 8px; transition: background 120ms ease; }
+.entry.is-editable:active{ background: var(--surface); }
+.all-btn{ color: var(--cat-color) !important; margin: 2px 0 6px; }
+.all-btn:disabled{ opacity: 0.5; }
