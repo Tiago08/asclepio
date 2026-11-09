@@ -15,22 +15,24 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/styles.css?v=19">
+<link rel="stylesheet" href="css/styles.css?v=20">
 <!-- Precarga en paralelo: sin esto el navegador descubre cada módulo
      solo después de bajar el anterior (una cascada en serie). -->
 <link rel="modulepreload" href="https://esm.sh/@supabase/supabase-js@2.119.0/es2022/supabase-js.bundle.mjs" crossorigin>
-<link rel="modulepreload" href="js/app.js?v=19">
-<link rel="modulepreload" href="js/supabaseClient.js?v=19">
-<link rel="modulepreload" href="js/config.js?v=19">
-<link rel="modulepreload" href="js/auth.js?v=19">
-<link rel="modulepreload" href="js/foods.js?v=19">
-<link rel="modulepreload" href="js/foodDict.js?v=19">
-<link rel="modulepreload" href="js/basics.js?v=19">
-<link rel="modulepreload" href="js/activity.js?v=19">
-<link rel="modulepreload" href="js/report.js?v=19">
-<link rel="modulepreload" href="js/health.js?v=19">
+<link rel="modulepreload" href="js/app.js?v=20">
+<link rel="modulepreload" href="js/supabaseClient.js?v=20">
+<link rel="modulepreload" href="js/config.js?v=20">
+<link rel="modulepreload" href="js/auth.js?v=20">
+<link rel="modulepreload" href="js/foods.js?v=20">
+<link rel="modulepreload" href="js/foodDict.js?v=20">
+<link rel="modulepreload" href="js/basics.js?v=20">
+<link rel="modulepreload" href="js/activity.js?v=20">
+<link rel="modulepreload" href="js/report.js?v=20">
+<link rel="modulepreload" href="js/health.js?v=20">
+<link rel="modulepreload" href="js/habits.js?v=20">
+<link rel="modulepreload" href="js/micros.js?v=20">
 </head>
-<body>
+<body data-tab="hoy">
 
 <!-- ============ CARGA ============ -->
 <!-- Se ve mientras se verifica la sesión; nunca se muestra el login a quien ya entró. -->
@@ -65,7 +67,11 @@
     <div class="header-row">
       <div class="wordmark">ASCLEPIO</div>
       <div class="header-right">
-        <span class="today-date mono" id="todayDate"></span>
+        <div class="day-nav" id="dayNav">
+          <button class="day-arrow" id="dayPrev" type="button" aria-label="Día anterior">‹</button>
+          <span class="today-date mono" id="todayDate"></span>
+          <button class="day-arrow" id="dayNext" type="button" aria-label="Día siguiente">›</button>
+        </div>
         <button class="logout-btn" id="logoutBtn">salir</button>
       </div>
     </div>
@@ -73,17 +79,24 @@
 
   <!-- Hoy se lee de arriba hacia abajo: cómo voy → qué me falta hoy → comidas → lo demás -->
   <div class="panel active" id="panel-hoy">
+    <div class="past-banner hidden"></div>
     <div id="ringRow"></div>
     <section class="day-tiles" id="dayTiles" aria-label="Estado de hoy"></section>
     <h2 class="section-title">Comidas</h2>
     <section class="meal-list" id="mealList" aria-label="Comidas de hoy"></section>
     <div class="favorites-row" id="favoritesRow"></div>
+    <div id="microArea"></div>
     <div id="insightArea"></div>
     <div class="section-row">
       <h2 class="section-title">Otros registros</h2>
       <button class="section-add" id="otherLogBtn" type="button">+ Registrar</button>
     </div>
     <div id="todayTimeline"></div>
+  </div>
+
+  <div class="panel" id="panel-habitos">
+    <div class="past-banner hidden"></div>
+    <div id="habitList"></div>
   </div>
 
   <div class="panel" id="panel-historial">
@@ -173,6 +186,7 @@
 <!-- ============ TAB BAR FIJA ============ -->
 <nav class="tabbar hidden" id="tabBar">
   <button class="tab-btn active" data-tab="hoy"><span class="tab-ic">◉</span><span class="tab-lb">Hoy</span></button>
+  <button class="tab-btn" data-tab="habitos"><span class="tab-ic">✓</span><span class="tab-lb">Hábitos</span></button>
   <button class="tab-btn" data-tab="historial"><span class="tab-ic">☷</span><span class="tab-lb">Historial</span></button>
   <button class="tab-btn" data-tab="ranking"><span class="tab-ic">♛</span><span class="tab-lb">Ranking</span></button>
   <button class="tab-btn" data-tab="datos"><span class="tab-ic">⚙</span><span class="tab-lb">Datos</span></button>
@@ -200,6 +214,6 @@
     }
   })();
 </script>
-<script type="module" src="js/app.js?v=19"></script>
+<script type="module" src="js/app.js?v=20"></script>
 </body>
 </html>

@@ -1,23 +1,26 @@
-import { supabase } from './supabaseClient.js?v=19';
+import { supabase } from './supabaseClient.js?v=20';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js?v=19';
+} from './auth.js?v=20';
 import {
   NUTRIENT_FIELDS, MICRO_FIELDS, searchUsda, searchLocalFoods, searchFavorites, updateFood,
   cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, moveFoodLog, restoreFoodLog, copyFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel, pluralEs
-} from './foods.js?v=19';
+} from './foods.js?v=20';
 import {
   logActivity, updateActivityLog, restoreActivityLog, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking
-} from './activity.js?v=19';
-import { buildReportText, downloadText } from './report.js?v=19';
-import { BASICS, searchBasics } from './basics.js?v=19';
+} from './activity.js?v=20';
+import { buildReportText, downloadText } from './report.js?v=20';
+import { BASICS, searchBasics } from './basics.js?v=20';
+import { normalizeText } from './foodDict.js?v=20';
 import {
   getGoalHistory, saveGoalsFrom, goalsForDate, getBodyProfile, saveBodyProfile, suggestGoals, PACES, paceOf, objectiveOf,
   getWeights, saveWeight, deleteWeight, getSupplements, addSupplement, retireSupplement,
   getSupplementLogs, getSupplementLogsInRange, setSupplementTaken, getWaterLogs, addWater, deleteWater,
   electrolyteTotals, getCombos, createCombo, deleteCombo
-} from './health.js?v=19';
+} from './health.js?v=20';
+import { HABIT_MOMENTS, getHabits, addHabit, updateHabit, archiveHabit, getHabitLogs, setHabitDone } from './habits.js?v=20';
+import { microTargets, microTotals, microStatus } from './micros.js?v=20';
 
 /* ================= actualización automática ================= */
 /* GitHub Pages deja guardar index.html hasta 10 min y la app instalada en el
@@ -52,6 +55,26 @@ function pad(n){ return n.toString().padStart(2,'0'); }
 function todayStr(){ const d = new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
 function nowStr(){ const d = new Date(); return pad(d.getHours())+':'+pad(d.getMinutes()); }
 function daysAgoStr(n){ const d = new Date(); d.setDate(d.getDate()-n); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+function addDays(date, n){ const d = new Date(date + 'T12:00:00'); d.setDate(d.getDate()+n); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+
+/* Día que se ve en Hoy y Hábitos. Hoy por defecto; con las flechas de arriba
+   se puede volver hasta 7 días para completar o corregir (más atrás no, para
+   que nadie rellene un mes viejo y suba en el ranking). Como el selector de
+   canal de un osciloscopio: la misma pantalla, otro canal. */
+const MAX_BACK_DAYS = 7;
+let viewDate = todayStr();
+function isViewingToday(){ return viewDate === todayStr(); }
+function oldestEditable(){ return daysAgoStr(MAX_BACK_DAYS); }
+function shortDate(d){ return new Date(d + 'T12:00:00').toLocaleDateString('es-VE', { weekday:'short', day:'numeric', month:'short' }); }
+function capFirst(s){ return s.charAt(0).toUpperCase() + s.slice(1); }
+/** El sueño se guarda en el día en que te despiertas: "noche del 7 al 8 nov". */
+function nightLabel(d){
+  const prev = new Date(addDays(d, -1) + 'T12:00:00'), cur = new Date(d + 'T12:00:00');
+  const mon = x => x.toLocaleDateString('es-VE', { month:'short' }).replace('.', '');
+  return prev.getMonth() === cur.getMonth()
+    ? `noche del ${prev.getDate()} al ${cur.getDate()} ${mon(cur)}`
+    : `noche del ${prev.getDate()} ${mon(prev)} al ${cur.getDate()} ${mon(cur)}`;
+}
 
 // Comidas del día, en el orden en que pasan. "Snack" es el nombre viejo de
 // Merienda: los registros de antes se muestran como Merienda.
@@ -70,7 +93,11 @@ function guessMomento(){
    se abre para cambiar comida, fecha u hora. Casi nunca cambia, así que no
    ocupa media hoja. Devuelve una función que lee lo elegido. */
 // Sin momento (gym, sueño, baño…) la línea solo dice el día y la hora.
-function whenHtml(momento, date = todayStr(), time = nowStr()){
+// sleep = true: el sueño se mide por noches ("noche del 7 al 8") y no pide hora.
+function whenHtml(momento, date = viewDate, time = nowStr(), sleep = false){
+  // se puede elegir hasta 7 días atrás (o la fecha que ya tenía, si es más vieja)
+  const min = date < oldestEditable() ? date : oldestEditable();
+  const dateField = `<div class="field"><label>${sleep ? 'Día en que te despertaste' : 'Fecha'}</label><input type="date" id="f_fecha" value="${escapeHtml(date)}" min="${min}" max="${todayStr()}"></div>`;
   return `
     <div class="when-line">
       <span id="whenText"></span>
@@ -78,10 +105,10 @@ function whenHtml(momento, date = todayStr(), time = nowStr()){
     </div>
     <div class="when-fields hidden" id="whenFields">
       ${momento ? `<div class="chip-row when-meals">${MEALS.map(m => `<button type="button" class="chip${m === momento ? ' selected' : ''}" data-meal="${m}">${m}</button>`).join('')}</div>` : ''}
-      <div class="row-2">
-        <div class="field"><label>Fecha</label><input type="date" id="f_fecha" value="${escapeHtml(date)}"></div>
+      ${sleep ? dateField : `<div class="row-2">
+        ${dateField}
         <div class="field"><label>Hora</label><input type="time" id="f_hora" value="${escapeHtml(time)}"></div>
-      </div>
+      </div>`}
     </div>`;
 }
 /** "hoy", "ayer" o "mar, 3 nov" */
@@ -95,10 +122,16 @@ function wireWhen(card, momento){
   const fecha = card.querySelector('#f_fecha'), hora = card.querySelector('#f_hora');
   const text = card.querySelector('#whenText');
   const paint = () => {
-    const day = dayLabel(fecha.value || todayStr());
+    const d = fecha.value || viewDate;
+    const day = dayLabel(d);
+    if(!hora){   // sueño: la noche que termina ese día
+      const rel = d === todayStr() ? 'anoche · ' : (d === daysAgoStr(1) ? 'antenoche · ' : '');
+      text.innerHTML = `<b>${capFirst(rel + nightLabel(d))}</b>`;
+      return;
+    }
     text.innerHTML = meal
       ? `<b>${meal}</b> · ${day} ${escapeHtml(hora.value || nowStr())}`
-      : `<b>${day.charAt(0).toUpperCase() + day.slice(1)}</b> · ${escapeHtml(hora.value || nowStr())}`;
+      : `<b>${capFirst(day)}</b> · ${escapeHtml(hora.value || nowStr())}`;
   };
   card.querySelector('#whenChangeBtn').addEventListener('click', ev => {
     card.querySelector('#whenFields').classList.toggle('hidden');
@@ -111,9 +144,9 @@ function wireWhen(card, momento){
     paint();
   }));
   fecha.addEventListener('input', paint);
-  hora.addEventListener('input', paint);
+  if(hora) hora.addEventListener('input', paint);
   paint();
-  return () => ({ momento: meal, date: fecha.value || todayStr(), time: hora.value || nowStr() });
+  return () => ({ momento: meal, date: fecha.value || viewDate, time: (hora && hora.value) || nowStr() });
 }
 
 // momento del día para el registro de energía, según la hora del teléfono
@@ -541,9 +574,42 @@ onAuthChange(handleSession);
 
 /* ================= boot ================= */
 
+/* Fecha de arriba con flechas ‹ › (solo en Hoy y Hábitos) y un aviso cuando
+   no estás en hoy, para no registrar en el día equivocado sin darte cuenta. */
+function dayTab(){ const t = document.body.dataset.tab || 'hoy'; return t === 'hoy' || t === 'habitos'; }
 function paintTodayDate(){
-  todayDateEl.textContent = new Date().toLocaleDateString('es-VE', { weekday:'short', day:'numeric', month:'short' });
+  const past = !isViewingToday();
+  // en Historial, Ranking y Datos la fecha de arriba es siempre la de hoy
+  todayDateEl.textContent = shortDate(dayTab() ? viewDate : todayStr());
+  document.getElementById('dayNav').classList.toggle('is-past', past && dayTab());
+  document.getElementById('dayNav').classList.toggle('no-arrows', !dayTab());
+  document.getElementById('dayPrev').disabled = viewDate <= oldestEditable();
+  document.getElementById('dayNext').disabled = !past;
+  document.querySelectorAll('.past-banner').forEach(el => {
+    el.classList.toggle('hidden', !past);
+    el.innerHTML = past ? `<span>Viendo <b>${escapeHtml(dayLabel(viewDate) === 'ayer' ? 'ayer, ' + shortDate(viewDate) : shortDate(viewDate))}</b>: lo que agregues queda en ese día.</span>
+      <button class="past-back" type="button" data-go-today>Volver a hoy</button>` : '';
+  });
 }
+
+/** Cambia el día que se ve en Hoy y Hábitos (hasta 7 días atrás). */
+async function setViewDate(d){
+  const today = todayStr();
+  if(d > today) d = today;
+  if(d < oldestEditable()) d = oldestEditable();
+  if(d === viewDate) return;
+  viewDate = d;
+  paintTodayDate();
+  try{
+    [waterToday, takenToday] = await Promise.all([getWaterLogs(user.id, d), getSupplementLogs(user.id, d)]);
+  }catch(err){ waterToday = []; takenToday = new Set(); }
+  await Promise.all([renderToday(), renderHabitsIfOpen()]);
+}
+document.getElementById('dayPrev').addEventListener('click', () => setViewDate(addDays(viewDate, -1)));
+document.getElementById('dayNext').addEventListener('click', () => setViewDate(addDays(viewDate, 1)));
+document.addEventListener('click', ev => {
+  if(ev.target.closest && ev.target.closest('[data-go-today]')) setViewDate(todayStr());
+});
 
 async function bootApp(){
   paintTodayDate();
@@ -566,7 +632,6 @@ async function bootApp(){
 
 /** Datos de la fase 2. Si la migración fase2.sql no se ha corrido, la app sigue funcionando sin ellos. */
 async function loadPhase2Data(){
-  const today = todayStr();
   const safe = (p, fallback) => p.catch(err => { console.warn('fase 2:', err.message || err); phase2Error = err; return fallback; });
   phase2Error = null;
   [goalHistory, bodyProfile, weights, supplements, takenToday, waterToday, combos] = await Promise.all([
@@ -574,8 +639,8 @@ async function loadPhase2Data(){
     safe(getBodyProfile(user.id), null),
     safe(getWeights(user.id), []),
     safe(getSupplements(user.id), []),
-    safe(getSupplementLogs(user.id, today), new Set()),
-    safe(getWaterLogs(user.id, today), []),
+    safe(getSupplementLogs(user.id, viewDate), new Set()),
+    safe(getWaterLogs(user.id, viewDate), []),
     safe(getCombos(user.id), [])
   ]);
   if(phase2Error) showError('Falta correr sql/fase2.sql en Supabase: ' + (phase2Error.message || phase2Error));
@@ -615,7 +680,7 @@ async function renderFavorites(){
         try{
           const momento = guessMomento();
           const row = await logFood({
-            userId: user.id, foodRow: food, momento, date: todayStr(), time: nowStr(),
+            userId: user.id, foodRow: food, momento, date: viewDate, time: nowStr(),
             quantity: last && Number(last.quantity) > 0 ? Number(last.quantity) : 1,
             label: last ? last.label : undefined
           });
@@ -670,7 +735,7 @@ function openActivityForm(typeKey, existing = null){
 
   // fecha y hora casi nunca cambian: una línea que se abre con "cambiar"
   const when = document.createElement('div');
-  when.innerHTML = whenHtml(null, existing ? existing.date : todayStr(), existing ? existing.time : nowStr());
+  when.innerHTML = whenHtml(null, existing ? existing.date : viewDate, existing ? existing.time : nowStr(), typeKey === 'sueno');
   card.appendChild(when);
   if(prefillNote){
     const p = document.createElement('p');
@@ -795,7 +860,10 @@ function openActivityForm(typeKey, existing = null){
   const readWhen = wireWhen(card, null);
 
   async function persist(payload, button, idleLabel){
-    const { date, time } = readWhen();
+    const when = readWhen();
+    const date = when.date;
+    // el sueño no pide hora: se guarda a la hora en que te despertaste
+    const time = typeKey === 'sueno' ? (payload.horaDespertar || (existing && existing.time) || nowStr()) : when.time;
     button.disabled = true; button.textContent = 'Guardando...';
     try{
       if(existing) await updateActivityLog(existing.id, { date, time, data: payload });
@@ -913,6 +981,11 @@ function openFoodForm(momento){
       <div class="field">
         <input type="search" id="foodSearchInput" placeholder="Buscar: arroz, cambur, Savoy..." aria-label="Buscar alimento" autocomplete="off" enterkeyhint="search">
       </div>
+      <div class="search-tabs" role="tablist" aria-label="Dónde buscar">
+        <button type="button" class="stab" role="tab" data-stab="frecuentes">Frecuentes</button>
+        <button type="button" class="stab" role="tab" data-stab="locales">Locales</button>
+        <button type="button" class="stab" role="tab" data-stab="usda">USDA</button>
+      </div>
     </div>
     <div id="foodSearchResults"></div>
     <div class="food-extra-actions">
@@ -934,18 +1007,7 @@ function openFoodForm(momento){
 
   const input = card.querySelector('#foodSearchInput');
   const resultsWrap = card.querySelector('#foodSearchResults');
-  let debounceTimer = null;
-
-  renderRecentFoods(resultsWrap);
-  input.addEventListener('input', () => {
-    clearTimeout(debounceTimer);
-    const q = input.value.trim();
-    if(q.length < 2){ foodSearchSeq++; renderRecentFoods(resultsWrap); return; }
-    debounceTimer = setTimeout(() => runFoodSearch(q, resultsWrap), 250);
-  });
-  // "Buscar" del teclado: lo esconde para ver todos los resultados
-  input.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); input.blur(); } });
-
+  wireFoodSearch(input, resultsWrap, card.querySelector('.search-tabs'));
   input.focus();
 }
 
@@ -967,7 +1029,7 @@ function renderRecentFoods(resultsWrap){
         </div>`).join('')}</div>`;
   }
   if(items.length){
-    html += `<div class="search-section-title">Frecuentes</div>
+    html += `<div class="search-section-title">Lo que más registras</div>
       <div class="food-search-results">${foodListHtml(items)}</div>`;
   }
   resultsWrap.innerHTML = html;
@@ -979,77 +1041,169 @@ function renderRecentFoods(resultsWrap){
   });
 }
 
-async function runFoodSearch(query, resultsWrap){
-  const seq = ++foodSearchSeq;
-  const isCurrent = () => seq === foodSearchSeq && resultsWrap.isConnected;
+/* Buscador con tres pestañas: Frecuentes (lo tuyo de siempre), Locales (tus
+   alimentos y los 110 básicos, sin red) y USDA (internet). Lo escrito se
+   mantiene al cambiar de pestaña. Si la pestaña la elige la app (no tú): al
+   escribir pasa a Locales, y si ahí hay menos de 3 resultados, salta a USDA.
+   Como un multiplexor: una sola pantalla, tres fuentes. */
+function wireFoodSearch(input, resultsWrap, tabsEl){
+  const st = {
+    tab: 'frecuentes',
+    auto: true,      // true = la pestaña la eligió la app; false = la tocaste tú
+    q: '',
+    local: null,     // { q, basics, local, loading }
+    usda: null       // { q, state: 'loading' | 'done', items }
+  };
+  let debounceTimer = null;
+  const isLive = () => resultsWrap.isConnected;
 
-  const basics = searchBasics(query);
-  let local = [];
-  let usdaState = 'idle'; // idle | loading | done
-  let usdaItems = [];
-
-  const render = () => {
+  const localMain = () => {
+    if(!st.local || st.local.q !== st.q) return [];
+    const { basics, local } = st.local;
     // tus alimentos que ya son copia de un básico se muestran una sola vez
     const localFdc = new Set(local.filter(f => f.source === 'usda').map(f => f.usda_fdc_id));
-    const main = rankFoods([...local.map(withUnits), ...basics.filter(b => !localFdc.has(b.usda_fdc_id))],
-      query, '', usedFoodIds).slice(0, MAX_MAIN_RESULTS);
-    const all = [...main, ...usdaItems];
+    return rankFoods([...local.map(withUnits), ...basics.filter(b => !localFdc.has(b.usda_fdc_id))],
+      st.q, '', usedFoodIds).slice(0, MAX_MAIN_RESULTS);
+  };
+  const freqMatches = () => {
+    const words = normalizeText(st.q).split(' ').filter(Boolean);
+    return usedFoods.map(withUnits).filter(f => {
+      const n = normalizeText(f.name + ' ' + (f.brand || ''));
+      return words.every(w => n.includes(w));
+    }).slice(0, MAX_MAIN_RESULTS);
+  };
 
-    let html = main.length
-      ? `<div class="food-search-results">${foodListHtml(main)}</div>`
-      : (usdaState === 'idle' ? `<div class="search-empty">Nada en tus alimentos ni en los básicos.</div>` : '');
-    if(usdaState === 'idle'){
-      html += `<button class="more-usda-btn" id="moreUsdaBtn" type="button">Buscar más en USDA ›</button>`;
-    }else if(usdaState === 'loading'){
-      html += `<div class="search-empty"><span class="spinner"></span> buscando en USDA...</div>`;
-    }else if(usdaItems.length){
-      html += `<div class="search-section-title">Más resultados (USDA)</div>
-        <div class="food-search-results">${foodListHtml(usdaItems, main.length)}</div>`;
-    }else{
-      html += `<div class="search-empty">USDA tampoco tiene resultados. Puedes crearlo como alimento nuevo.</div>`;
-    }
-    resultsWrap.innerHTML = html;
-    resultsWrap.querySelectorAll('[data-idx]').forEach(el => {
-      el.addEventListener('click', () => openQuantityStep(all[Number(el.dataset.idx)]));
+  const paintTabs = () => {
+    const searching = st.q.length >= 2;
+    const counts = {
+      frecuentes: searching ? freqMatches().length : null,
+      locales: searching && st.local && st.local.q === st.q && !st.local.loading ? localMain().length : null,
+      usda: searching && st.usda && st.usda.q === st.q && st.usda.state === 'done' ? st.usda.items.length : null
+    };
+    tabsEl.querySelectorAll('[data-stab]').forEach(b => {
+      const k = b.dataset.stab, on = k === st.tab;
+      b.classList.toggle('selected', on);
+      b.setAttribute('aria-selected', on);
+      const label = { frecuentes: 'Frecuentes', locales: 'Locales', usda: 'USDA' }[k];
+      b.innerHTML = counts[k] != null ? `${label} <span class="stab-n">${counts[k]}</span>` : label;
     });
-    const moreBtn = resultsWrap.querySelector('#moreUsdaBtn');
-    if(moreBtn) moreBtn.addEventListener('click', loadUsda);
+  };
+
+  const list = (items, title) => {
+    resultsWrap.innerHTML = (title ? `<div class="search-section-title">${title}</div>` : '')
+      + `<div class="food-search-results">${foodListHtml(items)}</div>`;
+    resultsWrap.querySelectorAll('[data-idx]').forEach(el => {
+      el.addEventListener('click', () => openQuantityStep(items[Number(el.dataset.idx)]));
+    });
+  };
+  const empty = (msg, withUsda) => {
+    resultsWrap.innerHTML = `<div class="search-empty">${msg}</div>`
+      + (withUsda ? `<button class="more-usda-btn" id="moreUsdaBtn" type="button">Buscar en USDA ›</button>` : '');
+    const b = resultsWrap.querySelector('#moreUsdaBtn');
+    if(b) b.addEventListener('click', () => pick('usda'));
+  };
+
+  const show = () => {
+    if(!isLive()) return;
+    paintTabs();
+    const searching = st.q.length >= 2;
+    if(st.tab === 'frecuentes'){
+      if(!searching){ renderRecentFoods(resultsWrap); return; }
+      const items = freqMatches();
+      if(items.length) list(items, 'Ya lo has registrado');
+      else empty('No lo has registrado antes. Mira en Locales o en USDA.', false);
+    }else if(st.tab === 'locales'){
+      if(!searching){ empty('Escribe para buscar en tus alimentos y en los 110 básicos.', false); return; }
+      const items = localMain();
+      if(items.length){
+        list(items, null);
+        resultsWrap.insertAdjacentHTML('beforeend', `<button class="more-usda-btn" id="moreUsdaBtn" type="button">¿No está? Buscar en USDA ›</button>`);
+        resultsWrap.querySelector('#moreUsdaBtn').addEventListener('click', () => pick('usda'));
+      }else if(st.local && st.local.loading) resultsWrap.innerHTML = `<div class="search-empty"><span class="spinner"></span> buscando...</div>`;
+      else empty('Nada en tus alimentos ni en los básicos.', true);
+    }else{
+      if(!searching){ empty('Escribe para buscar en USDA (sirve en español o en inglés).', false); return; }
+      if(!st.usda || st.usda.q !== st.q || st.usda.state === 'loading'){
+        resultsWrap.innerHTML = `<div class="search-empty"><span class="spinner"></span> buscando en USDA...</div>`;
+        return;
+      }
+      if(st.usda.items.length) list(st.usda.items, 'Resultados de USDA');
+      else empty('USDA tampoco tiene resultados. Puedes crearlo como alimento nuevo.', false);
+    }
   };
 
   const loadUsda = async () => {
-    usdaState = 'loading';
-    render();
-    const { rows, enQuery } = await searchUsda(query, user.email).catch(() => ({ rows: [], enQuery: '' }));
-    if(!isCurrent()) return;
-    // fuera lo que ya está arriba (tus copias guardadas y los básicos)
-    const shownFdc = new Set([...local, ...basics].map(f => f.usda_fdc_id).filter(Boolean));
-    const ranked = rankFoods(rows.filter(r => !shownFdc.has(r.usda_fdc_id)), query, enQuery, usedFoodIds);
-    usdaItems = pickForDisplay(ranked, MAX_USDA_RESULTS);
-    usdaState = 'done';
-    render();
+    const q = st.q;
+    if(q.length < 2 || (st.usda && st.usda.q === q)) { show(); return; }
+    st.usda = { q, state: 'loading', items: [] };
+    show();
+    const { rows, enQuery } = await searchUsda(q, user.email).catch(() => ({ rows: [], enQuery: '' }));
+    if(!st.usda || st.usda.q !== q) return;   // ya se escribió otra cosa
+    // fuera lo que ya está en Locales (tus copias guardadas y los básicos)
+    const shown = st.local && st.local.q === q ? [...st.local.local, ...st.local.basics] : searchBasics(q);
+    const shownFdc = new Set(shown.map(f => f.usda_fdc_id).filter(Boolean));
+    const ranked = rankFoods(rows.filter(r => !shownFdc.has(r.usda_fdc_id)), q, enQuery, usedFoodIds);
+    st.usda = { q, state: 'done', items: pickForDisplay(ranked, MAX_USDA_RESULTS) };
+    show();
     // los nombres que no estaban en caché se traducen y se cambian en su sitio
-    usdaItems.forEach(f => {
+    st.usda.items.forEach(f => {
       if(!f._needsTr) return;
       const before = f.name;
       translateToSpanish(f._en, user.email).then(es => {
-        if(es === before || !isCurrent()) return; // sin traducción (sin cuota o sin red)
+        if(es === before || !isLive()) return;   // sin traducción (sin cuota o sin red)
         f.name = es;
         f._needsTr = false;
-        render();
+        if(st.tab === 'usda') show();
       });
     });
   };
 
-  // 1) básicos: al instante, sin red
-  render();
-  // 2) tus alimentos (Supabase)
-  local = await searchLocalFoods(query).catch(() => []);
-  if(!isCurrent()) return;
-  render();
-  // 3) USDA solo si casi no hay nada; si no, queda el botón
-  const localFdc = new Set(local.map(f => f.usda_fdc_id).filter(Boolean));
-  const mainCount = local.length + basics.filter(b => !localFdc.has(b.usda_fdc_id)).length;
-  if(mainCount < 3) await loadUsda();
+  const runLocal = async () => {
+    const q = st.q;
+    const seq = ++foodSearchSeq;
+    // 1) básicos: al instante, sin red; 2) tus alimentos (Supabase)
+    st.local = { q, basics: searchBasics(q), local: [], loading: true };
+    show();
+    const local = await searchLocalFoods(q).catch(() => []);
+    if(seq !== foodSearchSeq || !isLive()) return;
+    st.local = { ...st.local, local, loading: false };
+    // 3) si la pestaña la elige la app: nada en Locales → salta a USDA; 1 o 2
+    //    resultados → se queda (lo tuyo primero) y busca en USDA por detrás, así la
+    //    pestaña USDA ya muestra cuántos hay y abre al instante
+    const n = localMain().length;
+    if(st.auto && st.tab === 'locales' && n === 0){ st.tab = 'usda'; await loadUsda(); return; }
+    show();
+    if(st.tab === 'usda' || (st.auto && n < 3)) loadUsda();
+  };
+
+  function pick(tab){
+    st.tab = tab;
+    st.auto = false;
+    show();
+    if(tab === 'usda') loadUsda();
+  }
+  tabsEl.querySelectorAll('[data-stab]').forEach(b => b.addEventListener('click', () => pick(b.dataset.stab)));
+
+  input.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    const q = input.value.trim();
+    if(q.length < 2){
+      foodSearchSeq++;
+      st.q = q;
+      if(st.auto) st.tab = 'frecuentes';
+      show();
+      return;
+    }
+    debounceTimer = setTimeout(() => {
+      st.q = q;
+      if(st.auto && st.tab === 'frecuentes') st.tab = 'locales';
+      runLocal();
+    }, 250);
+  });
+  // "Buscar" del teclado: lo esconde para ver todos los resultados
+  input.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); input.blur(); } });
+
+  show();
 }
 
 /* ---- paso de cantidad: unidades caseras y cálculo en vivo ---- */
@@ -1514,9 +1668,12 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+    document.body.dataset.tab = btn.dataset.tab;
+    paintTodayDate();
     window.scrollTo({ top: 0 });
     if(btn.dataset.tab === 'historial') await renderHistory();
     if(btn.dataset.tab === 'ranking') await renderRanking();
+    if(btn.dataset.tab === 'habitos') await renderHabits();
   });
 });
 
@@ -1528,7 +1685,8 @@ const shownEntries = new Map();
 function entryRow(e){
   shownEntries.set(e.id, e);
   const color = CAT_COLOR[e.kind === 'food' ? 'comida' : e.type];
-  const label = CAT_LABEL[e.kind === 'food' ? 'comida' : e.type];
+  let label = CAT_LABEL[e.kind === 'food' ? 'comida' : e.type];
+  if(e.type === 'sueno' && e.date) label += ' · ' + nightLabel(e.date);
   let summary = '';
   if(e.kind === 'food'){
     const d = e.data;
@@ -1555,7 +1713,7 @@ async function renderToday(){
   const wrap = document.getElementById('todayTimeline');
   wrap.innerHTML = `<div class="search-empty"><span class="spinner"></span> cargando...</div>`;
   try{
-    const list = await getEntriesForDate(user.id, todayStr());
+    const list = await getEntriesForDate(user.id, viewDate);
     todayEntries = list;
     const others = list.filter(e => e.kind !== 'food');
     wrap.innerHTML = others.length
@@ -1581,9 +1739,9 @@ async function renderToday(){
 const mealList = document.getElementById('mealList');
 const MEAL_ICON = { Desayuno: '☕', Almuerzo: '🍛', Merienda: '🍎', Cena: '🌙' };
 
-/** Lo que comiste ayer en esa comida (para "Repetir ayer"). */
+/** Lo que comiste el día antes (del que estás viendo) en esa comida, para "Repetir ayer". */
 function yesterdayMeal(m){
-  const y = daysAgoStr(1);
+  const y = addDays(viewDate, -1);
   return recentEntries.filter(e => e.kind === 'food' && e.date === y && mealOf(e.data.momento) === m);
 }
 
@@ -1599,7 +1757,7 @@ function renderMeals(foods){
         <div class="meal-h">
           <span class="meal-name"><span aria-hidden="true">${MEAL_ICON[m]}</span> ${m}</span>
           ${items.length ? `<span class="meal-kcal mono">${Math.round(kcal)} kcal</span>` : ''}
-          ${prev.length ? `<button class="meal-repeat" data-repeat-meal="${m}" type="button" aria-label="Repetir lo de ayer en ${m}: ${prev.length} alimento${prev.length === 1 ? '' : 's'}, ${Math.round(prevKcal)} kcal">↻ Repetir ayer</button>` : ''}
+          ${prev.length ? `<button class="meal-repeat" data-repeat-meal="${m}" type="button" aria-label="Repetir lo del día anterior en ${m}: ${prev.length} alimento${prev.length === 1 ? '' : 's'}, ${Math.round(prevKcal)} kcal">↻ ${isViewingToday() ? 'Repetir ayer' : 'Repetir día anterior'}</button>` : ''}
           <button class="meal-add" data-add-meal="${m}" type="button" aria-label="Agregar a ${m}">+</button>
         </div>
         ${items.length ? `<div class="meal-items">${items.map(e => `
@@ -1626,7 +1784,7 @@ function renderMeals(foods){
   });
 }
 
-/** Copia a hoy, a esta hora, lo que comiste ayer en esa comida. */
+/** Copia al día que estás viendo, a esta hora, lo que comiste el día antes en esa comida. */
 async function repeatYesterday(m, btn){
   const prev = yesterdayMeal(m);
   if(!prev.length) return;
@@ -1634,9 +1792,9 @@ async function repeatYesterday(m, btn){
   const rows = [];
   try{
     const time = nowStr();
-    for(const e of prev) rows.push(await copyFoodLog(e.data, todayStr(), time));
+    for(const e of prev) rows.push(await copyFoodLog(e.data, viewDate, time));
     await refreshAfterLog();
-    undoFoodToast(`${m} de ayer: ${rows.length} alimento${rows.length === 1 ? '' : 's'}`, rows);
+    undoFoodToast(`${m} ${isViewingToday() ? 'de ayer' : 'del día anterior'}: ${rows.length} alimento${rows.length === 1 ? '' : 's'}`, rows);
   }catch(err){
     showToast('Error: ' + err.message);
     btn.disabled = false;
@@ -1844,7 +2002,7 @@ function renderDaily(){
   if(!profile){ dayTiles.innerHTML = ''; return; }
 
   // agua
-  const goal = goalsFor(todayStr()).goal_water_ml;
+  const goal = goalsFor(viewDate).goal_water_ml;
   const ml = waterTotal();
   const water = tileHtml({
     id: 'tileWater', color: 'var(--c-agua)', icon: '💧', label: 'Agua', done: ml >= goal,
@@ -1864,7 +2022,7 @@ function renderDaily(){
 
   // gym
   const g = lastOfType('gym');
-  let gymV = '<span class="tile-empty">Registrar</span>', gymSub = '¿entrenaste hoy?';
+  let gymV = '<span class="tile-empty">Registrar</span>', gymSub = isViewingToday() ? '¿entrenaste hoy?' : '¿entrenaste?';
   if(g && g.data.fue === false){ gymV = '<span class="tile-text">Descanso</span>'; gymSub = 'día de recuperación'; }
   else if(g){
     const d = g.data;
@@ -1875,13 +2033,14 @@ function renderDaily(){
 
   // sueño
   const s = lastOfType('sueno');
-  let sleepV = '<span class="tile-empty">Registrar</span>', sleepSub = '¿cómo dormiste?';
+  // el sueño de un día es la noche que termina ese día: el de hoy es el de anoche
+  let sleepV = '<span class="tile-empty">Registrar</span>', sleepSub = isViewingToday() ? '¿cómo dormiste?' : nightLabel(viewDate);
   if(s){
     const { dur } = calcSleep(s.data);
     sleepV = dur != null ? fmtDur(dur).replace(' min', '') : `${s.data.horaDormir || '?'} → ${s.data.horaDespertar || '?'}`;
     sleepSub = s.data.calidad ? `calidad ${s.data.calidad}/5` : 'registrado';
   }
-  const sleep = tileHtml({ id: 'tileSleep', color: 'var(--c-sueno)', icon: '🌙', label: 'Sueño', value: sleepV, sub: sleepSub, done: !!s });
+  const sleep = tileHtml({ id: 'tileSleep', color: 'var(--c-sueno)', icon: '🌙', label: isViewingToday() ? 'Anoche' : 'Sueño', value: sleepV, sub: sleepSub, done: !!s });
 
   // baño y energía: mosaicos bajitos de una línea, para no cargar la pantalla
   const banos = todayEntries.filter(e => e.kind === 'activity' && e.type === 'bano');
@@ -1918,6 +2077,74 @@ function renderDaily(){
   dayTiles.querySelector('#tileSleep').addEventListener('click', () => openActivityForm('sueno', lastOfType('sueno')));
   dayTiles.querySelector('#tileBano').addEventListener('click', () => openActivityForm('bano'));
   dayTiles.querySelector('#tileEnergia').addEventListener('click', () => openActivityForm('energia'));
+  renderMicros();
+}
+
+/* ---- micronutrientes: sección plegable, cerrada por defecto ---- */
+
+const microArea = document.getElementById('microArea');
+const MICRO_OPEN_KEY = 'asclepio_micros_open';
+function fmtMicro(v){
+  if(v == null) return '—';
+  if(v >= 100) return String(Math.round(v));
+  if(v >= 10) return String(Math.round(v * 10) / 10).replace('.', ',');
+  return String(Math.round(v * 100) / 100).replace('.', ',');
+}
+
+function renderMicros(){
+  if(!profile){ microArea.innerHTML = ''; return; }
+  const sex = bodyProfile && bodyProfile.sex ? bodyProfile.sex : null;
+  const age = bodyProfile && bodyProfile.birth_year ? new Date().getFullYear() - Number(bodyProfile.birth_year) : null;
+  const targets = microTargets(sex, age, goalsFor(viewDate).goal_kcal);
+  const { totals, has } = microTotals(todayFoodRows, waterToday);
+  let ok = 0, over = 0;
+  // los que traen dato primero; los "sin datos" al final, para no tapar lo que sí se sabe
+  targets.sort((a, b) => (has[a.key] ? 0 : 1) - (has[b.key] ? 0 : 1));
+  const rows = targets.map(t => {
+    const v = totals[t.key] || 0;
+    const st = microStatus(t, v, !!has[t.key]);
+    if(st === 'ok' && !t.limitOnly) ok++;
+    if(st === 'over') over++;
+    // escala de la barra: 1,5 veces la meta (o 1,25 veces el máximo si solo hay máximo)
+    const scale = t.limitOnly ? t.max * 1.25 : t.goal * 1.5;
+    const pct = x => Math.max(0, Math.min(100, (x / scale) * 100));
+    const marks = [
+      t.min != null && t.min < t.goal ? `<i class="mk mk-min" style="left:${pct(t.min)}%"></i>` : '',
+      t.goal != null ? `<i class="mk mk-goal" style="left:${pct(t.goal)}%"></i>` : '',
+      t.max != null && t.max <= scale ? `<i class="mk mk-max" style="left:${pct(t.max)}%"></i>` : ''
+    ].join('');
+    const ref = t.limitOnly
+      ? `máx ${fmtMicro(t.max)}`
+      : [`mín ${fmtMicro(t.min)}`, `meta ${fmtMicro(t.goal)}`, t.max != null ? `máx ${fmtMicro(t.max)}` : null].filter(Boolean).join(' · ');
+    const stTxt = { none: 'sin datos', low: 'bajo', near: 'casi', ok: t.limitOnly ? 'bien' : 'en meta', over: 'pasado' }[st];
+    return `
+      <div class="micro-row is-${st}">
+        <div class="micro-top">
+          <span class="micro-name">${escapeHtml(t.label)} <span class="micro-st">${stTxt}</span></span>
+          <span class="mono"><b>${st === 'none' ? '—' : fmtMicro(v)}</b> / ${fmtMicro(t.limitOnly ? t.max : t.goal)} ${t.unit}</span>
+        </div>
+        <div class="micro-bar"><span class="micro-fill" style="width:${st === 'none' ? 0 : pct(v)}%"></span>${marks}</div>
+        <div class="micro-ref mono">${ref}</div>
+      </div>`;
+  }).join('');
+  const goalsCount = targets.filter(t => !t.limitOnly).length;
+  const summary = todayFoodRows.length
+    ? `${ok} de ${goalsCount} en meta${over ? ` · <span class="micro-over">${over} pasado${over === 1 ? '' : 's'}</span>` : ''}`
+    : 'sin comida registrada';
+  let open = false;
+  try{ open = localStorage.getItem(MICRO_OPEN_KEY) === '1'; }catch(e){ /* sin almacenamiento: cerrada */ }
+  const who = sex ? `${sex}${age ? ', ' + age + ' años' : ''}` : null;
+  microArea.innerHTML = `
+    <details class="micro-acc"${open ? ' open' : ''}>
+      <summary><span class="micro-title">🔬 Micronutrientes</span><span class="micro-sum">${summary}</span></summary>
+      <div class="micro-legend"><span><i class="mk mk-min"></i>mínimo</span><span><i class="mk mk-goal"></i>meta</span><span><i class="mk mk-max"></i>máximo seguro</span></div>
+      <div class="micro-list">${rows}</div>
+      <p class="form-hint micro-hint">${who ? `Valores de referencia para ${escapeHtml(who)}.` : 'Completa sexo y edad en Datos para metas exactas (por ahora: hombre adulto).'}
+        Muchos alimentos no traen todos los micronutrientes: un número bajo puede ser falta de datos.</p>
+    </details>`;
+  microArea.querySelector('details').addEventListener('toggle', ev => {
+    try{ localStorage.setItem(MICRO_OPEN_KEY, ev.currentTarget.open ? '1' : '0'); }catch(e){ /* sin almacenamiento */ }
+  });
 }
 
 /* ---- registrar: comida (lo más frecuente) y el resto en pastillas ---- */
@@ -1946,9 +2173,9 @@ function openOtherLogPicker(){
 
 async function quickWater(ml, withUndo = false){
   try{
-    const row = await addWater(user.id, { date: todayStr(), time: nowStr(), ml });
+    const row = await addWater(user.id, { date: viewDate, time: nowStr(), ml });
     waterToday.push(row);
-    const msg = `+${ml} ml · ${fmtLiters(waterTotal())} L hoy`;
+    const msg = `+${ml} ml · ${fmtLiters(waterTotal())} L ${dayLabel(viewDate)}`;
     if(withUndo){
       showToast(msg, { label: 'Deshacer', fn: async () => {
         try{
@@ -1969,14 +2196,14 @@ function openWaterForm(){
   const card = document.createElement('div');
   card.className = 'form-card';
   card.style.setProperty('--cat-color', 'var(--c-agua)');
-  const goal = goalsFor(todayStr()).goal_water_ml;
+  const goal = goalsFor(viewDate).goal_water_ml;
   const ml = waterTotal();
   const list = waterToday.slice().sort((a, b) => String(a.log_time).localeCompare(String(b.log_time)));
   const last = list.length ? list[list.length - 1] : null;
   const el = electrolyteTotals(todayFoodRows, waterToday);
   const hasEl = el.sodium_mg + el.potassium_mg + el.magnesium_mg > 0;
   card.innerHTML = `
-    <h3><span>💧</span> Agua</h3>
+    <h3><span>💧</span> Agua${isViewingToday() ? '' : ' · ' + dayLabel(viewDate)}</h3>
     <div class="sheet-stat"><b>${fmtLiters(ml)}</b> / ${fmtLiters(goal)} L
       <span class="tile-bar"><span style="width:${pctWidth(ml, goal)}"></span></span></div>
     <div class="chip-row sheet-quick">
@@ -1985,8 +2212,8 @@ function openWaterForm(){
       <button class="chip" data-add="750" type="button">+750 ml</button>
       ${last ? `<button class="chip chip-remove" id="waterUndoBtn" type="button">− Quitar el último (${Math.round(last.ml)} ml)</button>` : ''}
     </div>
-    ${hasEl ? `<div class="calc-box">Electrolitos de hoy (comida + bebidas)<br>Sodio <b>${Math.round(el.sodium_mg)}</b> · Potasio <b>${Math.round(el.potassium_mg)}</b> · Magnesio <b>${Math.round(el.magnesium_mg)}</b> mg</div>` : ''}
-    ${list.length ? `<div class="search-section-title">Hoy</div><div class="combo-items">${list.map(w => `
+    ${hasEl ? `<div class="calc-box">Electrolitos de ${dayLabel(viewDate)} (comida + bebidas)<br>Sodio <b>${Math.round(el.sodium_mg)}</b> · Potasio <b>${Math.round(el.potassium_mg)}</b> · Magnesio <b>${Math.round(el.magnesium_mg)}</b> mg</div>` : ''}
+    ${list.length ? `<div class="search-section-title">${capFirst(dayLabel(viewDate))}</div><div class="combo-items">${list.map(w => `
       <div class="combo-item"><span><span class="mono entry-time">${String(w.log_time).slice(0, 5)}</span> ${Math.round(w.ml)} ml${w.label ? ' · ' + escapeHtml(w.label) : ''}</span>
         <button class="entry-del" data-del-water="${w.id}" type="button">eliminar</button></div>`).join('')}</div>` : ''}
     <details class="more-fields" id="waterCustom">
@@ -2037,7 +2264,7 @@ function openWaterForm(){
     ev.currentTarget.disabled = true;
     try{
       const row = await addWater(user.id, {
-        date: todayStr(), time: nowStr(), ml: amount,
+        date: viewDate, time: nowStr(), ml: amount,
         label: card.querySelector('#w_label').value.trim() || null,
         sodium_mg: num('#w_na'), potassium_mg: num('#w_k'), magnesium_mg: num('#w_mg')
       });
@@ -2058,7 +2285,7 @@ function openSupplementsForm(){
   card.style.setProperty('--cat-color', 'var(--c-supl)');
   const empty = supplements.length === 0;
   card.innerHTML = `
-    <h3><span>💊</span> Suplementos de hoy</h3>
+    <h3><span>💊</span> Suplementos${isViewingToday() ? ' de hoy' : ' · ' + dayLabel(viewDate)}</h3>
     ${empty ? '<p class="form-hint">Agrega lo que tomas a diario (creatina, magnesio, vitamina D…). Después lo marcas aquí con un toque.</p>' : `
     <div class="check-list">${supplements.map(s => `
       <button class="check-row${takenToday.has(s.id) ? ' on' : ''}" data-supp="${s.id}" type="button" aria-pressed="${takenToday.has(s.id)}">
@@ -2094,7 +2321,7 @@ function openSupplementsForm(){
     taken ? takenToday.add(id) : takenToday.delete(id);
     paint(taken);
     renderDaily();
-    try{ await setSupplementTaken(user.id, id, todayStr(), taken); }
+    try{ await setSupplementTaken(user.id, id, viewDate, taken); }
     catch(err){
       taken ? takenToday.delete(id) : takenToday.add(id);
       paint(!taken);
@@ -2106,8 +2333,8 @@ function openSupplementsForm(){
     ev.currentTarget.disabled = true;
     const pending = supplements.filter(s => !takenToday.has(s.id));
     try{
-      for(const s of pending){ await setSupplementTaken(user.id, s.id, todayStr(), true); takenToday.add(s.id); }
-      showToast('Suplementos de hoy listos');
+      for(const s of pending){ await setSupplementTaken(user.id, s.id, viewDate, true); takenToday.add(s.id); }
+      showToast(`Suplementos de ${dayLabel(viewDate)} listos`);
     }catch(err){ showToast('Error: ' + err.message); }
     renderDaily();
     openSupplementsForm();
@@ -2159,7 +2386,8 @@ async function renderHistory(){
       return `
         <details class="day-block">
           <summary class="day-summary"><span class="d-date">${label}</span><span class="d-count mono">${kcalTxt}${entries.length} reg.</span></summary>
-          <div class="day-body"><div class="timeline">${entries.map(entryRow).join('')}</div></div>
+          <div class="day-body"><div class="timeline">${entries.map(entryRow).join('')}</div>
+            ${date >= oldestEditable() ? `<button class="btn-link open-day" type="button" data-open-day="${date}">Abrir este día para agregar o cambiar ›</button>` : ''}</div>
         </details>`;
     }).join('');
   }catch(err){
@@ -2186,6 +2414,14 @@ document.addEventListener('click', async (ev) => {
   }
 });
 
+// "Abrir este día": lleva a Hoy, viendo ese día
+document.addEventListener('click', async ev => {
+  const b = ev.target.closest && ev.target.closest('[data-open-day]');
+  if(!b) return;
+  document.querySelector('.tab-btn[data-tab="hoy"]').click();
+  await setViewDate(b.dataset.openDay);
+});
+
 // tocar un registro de gym, sueño, baño, energía o nota lo abre para cambiarlo
 document.addEventListener('click', ev => {
   if(ev.target.closest && ev.target.closest('.entry-del')) return;
@@ -2194,6 +2430,184 @@ document.addEventListener('click', ev => {
   const e = shownEntries.get(row.dataset.editActivity);
   if(e) openActivityForm(e.type, e);
 });
+
+/* ================= hábitos ================= */
+/* Pestaña propia. Cada hábito: nombre, cuántas veces por semana y en qué
+   momento del día. Se marca con un toque en el día que estás viendo.
+   No dan puntos ni cuentan para la racha. */
+
+let habits = [];
+let habitLogs = [];          // marcas de la semana del día que se ve: [{ habit_id, log_date }]
+const habitList = document.getElementById('habitList');
+const WEEK_LETTERS = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
+
+/** Lunes de la semana de ese día */
+function mondayOf(d){
+  const dow = (new Date(d + 'T12:00:00').getDay() + 6) % 7;   // 0 = lunes
+  return addDays(d, -dow);
+}
+function habitDone(id, date){ return habitLogs.some(l => l.habit_id === id && l.log_date === date); }
+function habitWeekCount(id){ return new Set(habitLogs.filter(l => l.habit_id === id).map(l => l.log_date)).size; }
+function timesText(n){ return n === 7 ? 'todos los días' : `${n} ${n === 1 ? 'vez' : 'veces'} por semana`; }
+function habitTableMissing(err){ return /habit|does not exist|42P01|schema cache/i.test((err && err.message) || ''); }
+
+function renderHabitsIfOpen(){
+  return document.getElementById('panel-habitos').classList.contains('active') ? renderHabits() : Promise.resolve();
+}
+
+async function renderHabits(){
+  if(!user) return;
+  if(!habitList.innerHTML) habitList.innerHTML = `<div class="search-empty"><span class="spinner"></span> cargando...</div>`;
+  const mon = mondayOf(viewDate);
+  try{
+    [habits, habitLogs] = await Promise.all([getHabits(user.id), getHabitLogs(user.id, mon, addDays(mon, 6))]);
+  }catch(err){
+    habitList.innerHTML = `<div class="empty-state">${habitTableMissing(err)
+      ? 'Falta correr <b>sql/fase3.sql</b> en Supabase para usar los hábitos.'
+      : 'Error: ' + escapeHtml(err.message || String(err))}</div>`;
+    return;
+  }
+  paintHabits();
+}
+
+function paintHabits(){
+  const mon = mondayOf(viewDate);
+  const week = Array.from({ length: 7 }, (_, i) => addDays(mon, i));
+  const today = todayStr();
+  const head = `
+    <div class="section-row">
+      <h2 class="section-title">Hábitos</h2>
+      <button class="section-add" id="newHabitBtn" type="button">+ Nuevo</button>
+    </div>`;
+  if(!habits.length){
+    habitList.innerHTML = head + `
+      <div class="data-card habit-empty">
+        <h4>Crea tus hábitos</h4>
+        <p>Lo que quieras repetir: leer, estirar, meditar, sol de la mañana… Eliges cuántas veces a la semana y en qué momento del día, y lo marcas al cumplirlo.</p>
+        <button class="btn-primary" id="firstHabitBtn" type="button" style="--cat-color: var(--c-habito)">Crear mi primer hábito</button>
+      </div>`;
+    habitList.querySelector('#newHabitBtn').addEventListener('click', () => openHabitForm());
+    habitList.querySelector('#firstHabitBtn').addEventListener('click', () => openHabitForm());
+    return;
+  }
+  const doneToday = habits.filter(h => habitDone(h.id, viewDate)).length;
+  const metWeek = habits.filter(h => habitWeekCount(h.id) >= h.times_per_week).length;
+  const groups = HABIT_MOMENTS.map(m => {
+    const list = habits.filter(h => (h.momento || 'cualquiera') === m.key);
+    if(!list.length) return '';
+    return `
+      <div class="habit-group">
+        <div class="search-section-title">${m.icon} ${m.label}</div>
+        ${list.map(h => {
+          const done = habitDone(h.id, viewDate);
+          const n = habitWeekCount(h.id);
+          const met = n >= h.times_per_week;
+          return `
+            <div class="habit${done ? ' is-done' : ''}">
+              <button class="habit-check" data-habit-toggle="${h.id}" type="button" aria-pressed="${done}" aria-label="${done ? 'Desmarcar' : 'Marcar'} ${escapeHtml(h.name)}">${done ? '✓' : ''}</button>
+              <button class="habit-main" data-habit-edit="${h.id}" type="button">
+                <span class="habit-name">${escapeHtml(h.name)}</span>
+                <span class="habit-week">
+                  <span class="habit-dots">${week.map((d, i) => `<i class="${habitDone(h.id, d) ? 'on' : ''}${d === viewDate ? ' is-view' : ''}${d > today ? ' is-future' : ''}">${WEEK_LETTERS[i]}</i>`).join('')}</span>
+                  <span class="habit-count${met ? ' is-met' : ''}">${met ? '✓ ' : ''}${n}/${h.times_per_week}</span>
+                </span>
+              </button>
+            </div>`;
+        }).join('')}
+      </div>`;
+  }).join('');
+  habitList.innerHTML = head + `
+    <div class="habit-summary">
+      <span><b class="mono">${doneToday}</b> de ${habits.length} ${dayLabel(viewDate)}</span>
+      <span>${metWeek} de ${habits.length} con la meta de la semana</span>
+    </div>` + groups + `<p class="form-hint habit-hint">Toca el círculo para marcar, o el nombre para cambiarlo. Los hábitos no dan puntos del ranking.</p>`;
+
+  habitList.querySelector('#newHabitBtn').addEventListener('click', () => openHabitForm());
+  habitList.querySelectorAll('[data-habit-edit]').forEach(b => b.addEventListener('click', () => {
+    const h = habits.find(x => x.id === b.dataset.habitEdit);
+    if(h) openHabitForm(h);
+  }));
+  habitList.querySelectorAll('[data-habit-toggle]').forEach(b => b.addEventListener('click', async () => {
+    const id = b.dataset.habitToggle, date = viewDate;
+    const done = !habitDone(id, date);
+    // se marca al instante; si falla, se deshace
+    const apply = on => {
+      habitLogs = habitLogs.filter(l => !(l.habit_id === id && l.log_date === date));
+      if(on) habitLogs.push({ habit_id: id, log_date: date });
+      paintHabits();
+    };
+    apply(done);
+    try{ await setHabitDone(user.id, id, date, done); }
+    catch(err){ apply(!done); showToast('Error: ' + err.message); }
+  }));
+}
+
+function openHabitForm(existing = null){
+  resetForm();
+  const card = document.createElement('div');
+  card.className = 'form-card';
+  card.style.setProperty('--cat-color', 'var(--c-habito)');
+  let times = existing ? existing.times_per_week : 7;
+  let momento = existing ? (existing.momento || 'cualquiera') : 'cualquiera';
+  card.innerHTML = `
+    <h3><span>✓</span> ${existing ? 'Hábito <span class="h-note">editar</span>' : 'Nuevo hábito'}</h3>
+    <div class="field"><label>Nombre</label>
+      <input type="text" id="h_name" maxlength="60" placeholder="Ej: Leer 20 min" value="${existing ? escapeHtml(existing.name) : ''}" autocomplete="off" enterkeyhint="done"></div>
+    <div class="field"><label>¿Cuántas veces por semana?</label>
+      <div class="chip-row habit-times">${[1, 2, 3, 4, 5, 6, 7].map(n => `<button type="button" class="chip${n === times ? ' selected' : ''}" data-times="${n}">${n}</button>`).join('')}</div>
+      <div class="form-hint habit-times-txt" id="h_times_txt">${timesText(times)}</div></div>
+    <div class="field"><label>¿En qué momento del día?</label>
+      <div class="chip-row habit-moments">${HABIT_MOMENTS.map(m => `<button type="button" class="chip${m.key === momento ? ' selected' : ''}" data-moment="${m.key}">${m.icon} ${m.label}</button>`).join('')}</div></div>
+    ${existing ? '<button class="btn-link btn-danger-link" id="archiveHabitBtn" type="button">Archivar este hábito</button>' : ''}
+    <div class="form-actions sticky">
+      <button class="btn-ghost" id="cancelBtn" type="button">Cancelar</button>
+      <button class="btn-primary" id="saveBtn" type="button">${existing ? 'Guardar cambios' : 'Crear hábito'}</button>
+    </div>`;
+  formArea.appendChild(card);
+  const nameInput = card.querySelector('#h_name');
+  nameInput.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); nameInput.blur(); } });
+  card.querySelectorAll('[data-times]').forEach(b => b.addEventListener('click', () => {
+    card.querySelectorAll('[data-times]').forEach(x => x.classList.remove('selected'));
+    b.classList.add('selected');
+    times = Number(b.dataset.times);
+    card.querySelector('#h_times_txt').textContent = timesText(times);
+  }));
+  card.querySelectorAll('[data-moment]').forEach(b => b.addEventListener('click', () => {
+    card.querySelectorAll('[data-moment]').forEach(x => x.classList.remove('selected'));
+    b.classList.add('selected');
+    momento = b.dataset.moment;
+  }));
+  card.querySelector('#cancelBtn').addEventListener('click', closeForm);
+  card.querySelector('#saveBtn').addEventListener('click', async (ev) => {
+    const name = nameInput.value.trim();
+    if(!name){ showToast('Escribe el nombre del hábito'); nameInput.focus(); return; }
+    const btn = ev.currentTarget;
+    btn.disabled = true; btn.textContent = 'Guardando...';
+    try{
+      if(existing) await updateHabit(existing.id, { name, times_per_week: times, momento });
+      else await addHabit(user.id, { name, times_per_week: times, momento, sort: habits.reduce((m, h) => Math.max(m, h.sort || 0), 0) + 1 });
+      closeForm();
+      showToast(existing ? 'Hábito guardado' : `${name}: creado`);
+      await renderHabits();
+    }catch(err){
+      showToast(habitTableMissing(err) ? 'Falta correr sql/fase3.sql en Supabase' : 'Error: ' + err.message);
+      btn.disabled = false; btn.textContent = existing ? 'Guardar cambios' : 'Crear hábito';
+    }
+  });
+  if(existing){
+    card.querySelector('#archiveHabitBtn').addEventListener('click', async () => {
+      dismissSheet();
+      try{ await archiveHabit(existing.id); }
+      catch(err){ showToast('Error: ' + err.message); return; }
+      await renderHabits();
+      showToast(`${existing.name}: archivado`, { label: 'Deshacer', fn: async () => {
+        try{ await updateHabit(existing.id, { active: true }); await renderHabits(); showToast('Recuperado'); }
+        catch(err){ showToast('Error: ' + err.message); }
+      }});
+    });
+  }
+  if(!existing) setTimeout(() => nameInput.focus(), 50);
+}
 
 /* ================= ranking ================= */
 
@@ -2279,7 +2693,7 @@ function renderRings(foodEntries){
     const d = e.data;
     ['kcal','protein_g','carbs_g','fat_g'].forEach(k => { if(d[k] != null) totals[k] += Number(d[k]); });
   });
-  const g = goalsFor(todayStr());
+  const g = goalsFor(viewDate);
   const diff = Math.round(g.goal_kcal) - Math.round(totals.kcal);
   const over = diff < 0;
   const macros = [
@@ -2373,16 +2787,19 @@ let dailyFor = todayStr();
 async function reloadDailyIfNewDay(){
   const today = todayStr();
   if(dailyFor === today) return false;
+  // si estabas viendo "hoy", pasas al día nuevo; si veías otro día, te quedas en él
+  // (salvo que ya quede a más de 7 días)
+  if(viewDate === dailyFor || viewDate < oldestEditable()) viewDate = today;
   dailyFor = today;
   paintTodayDate();
   try{
-    [waterToday, takenToday] = await Promise.all([getWaterLogs(user.id, today), getSupplementLogs(user.id, today)]);
+    [waterToday, takenToday] = await Promise.all([getWaterLogs(user.id, viewDate), getSupplementLogs(user.id, viewDate)]);
   }catch(err){ waterToday = []; takenToday = new Set(); }
   return true;
 }
 document.addEventListener('visibilitychange', async () => {
   if(document.visibilityState === 'visible' && user && await reloadDailyIfNewDay()){
-    await Promise.all([renderToday(), renderStats(), renderFavorites()]);
+    await Promise.all([renderToday(), renderStats(), renderFavorites(), renderHabitsIfOpen()]);
   }
 });
 
