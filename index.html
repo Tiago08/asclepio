@@ -15,22 +15,22 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/styles.css?v=20">
+<link rel="stylesheet" href="css/styles.css?v=23">
 <!-- Precarga en paralelo: sin esto el navegador descubre cada módulo
      solo después de bajar el anterior (una cascada en serie). -->
 <link rel="modulepreload" href="https://esm.sh/@supabase/supabase-js@2.119.0/es2022/supabase-js.bundle.mjs" crossorigin>
-<link rel="modulepreload" href="js/app.js?v=20">
-<link rel="modulepreload" href="js/supabaseClient.js?v=20">
-<link rel="modulepreload" href="js/config.js?v=20">
-<link rel="modulepreload" href="js/auth.js?v=20">
-<link rel="modulepreload" href="js/foods.js?v=20">
-<link rel="modulepreload" href="js/foodDict.js?v=20">
-<link rel="modulepreload" href="js/basics.js?v=20">
-<link rel="modulepreload" href="js/activity.js?v=20">
-<link rel="modulepreload" href="js/report.js?v=20">
-<link rel="modulepreload" href="js/health.js?v=20">
-<link rel="modulepreload" href="js/habits.js?v=20">
-<link rel="modulepreload" href="js/micros.js?v=20">
+<link rel="modulepreload" href="js/app.js?v=23">
+<link rel="modulepreload" href="js/supabaseClient.js?v=23">
+<link rel="modulepreload" href="js/config.js?v=23">
+<link rel="modulepreload" href="js/auth.js?v=23">
+<link rel="modulepreload" href="js/foods.js?v=23">
+<link rel="modulepreload" href="js/foodDict.js?v=23">
+<link rel="modulepreload" href="js/basics.js?v=23">
+<link rel="modulepreload" href="js/activity.js?v=23">
+<link rel="modulepreload" href="js/report.js?v=23">
+<link rel="modulepreload" href="js/health.js?v=23">
+<link rel="modulepreload" href="js/habits.js?v=23">
+<link rel="modulepreload" href="js/micros.js?v=23">
 </head>
 <body data-tab="hoy">
 
@@ -99,7 +99,14 @@
     <div id="habitList"></div>
   </div>
 
+  <div class="panel" id="panel-sueno">
+    <div id="sleepArea"></div>
+  </div>
+
+  <!-- Historial: ya no tiene pestaña; se abre desde Datos -->
   <div class="panel" id="panel-historial">
+    <button class="btn-link back-link" id="historyBackBtn" type="button">‹ Datos</button>
+    <h2 class="section-title">Historial</h2>
     <div id="historyList"></div>
   </div>
 
@@ -108,46 +115,48 @@
   </div>
 
   <div class="panel" id="panel-datos">
-    <!-- Objetivo en 3 pasos: tus datos → qué quieres → tu meta. Un solo botón. -->
-    <h2 class="section-title">Tu objetivo</h2>
+    <!-- Tu meta va primero y se edita aquí mismo. La calculadora queda escondida:
+         solo se abre sola si todavía no has puesto tus datos. -->
+    <h2 class="section-title">Tu meta diaria</h2>
     <div class="data-card goal-card">
-      <div class="step">
-        <div class="step-h"><span class="step-n">1</span>Tus datos <span class="step-note">solo los ves tú</span></div>
-        <div class="chip-row sex-chips" id="sexChips">
-          <button type="button" class="chip" data-sex="hombre">Hombre</button>
-          <button type="button" class="chip" data-sex="mujer">Mujer</button>
-        </div>
-        <div class="row-3">
-          <div class="field"><label>Edad</label><input type="number" id="bodyAge" inputmode="numeric" min="10" max="100" placeholder="años"></div>
-          <div class="field"><label>Altura</label><input type="number" id="bodyHeight" inputmode="numeric" min="100" max="250" placeholder="cm"></div>
-          <div class="field"><label>Peso</label><input type="text" id="bodyWeight" inputmode="decimal" autocomplete="off" placeholder="kg"></div>
-        </div>
+      <div class="row-2 goal-inputs">
+        <div class="field"><label>Calorías (kcal)</label><input type="number" id="goalKcal" inputmode="numeric" min="0"></div>
+        <div class="field"><label>Proteína (g)</label><input type="number" id="goalProtein" inputmode="numeric" min="0"></div>
+        <div class="field"><label>Carbos (g)</label><input type="number" id="goalCarbs" inputmode="numeric" min="0"></div>
+        <div class="field"><label>Grasa (g)</label><input type="number" id="goalFat" inputmode="numeric" min="0"></div>
+        <div class="field"><label>Agua (ml)</label><input type="number" id="goalWater" inputmode="numeric" min="0" step="250"></div>
       </div>
+      <div class="goal-check" id="goalCheck"></div>
+      <button class="btn-primary" id="saveGoalsBtn" type="button" style="--cat-color: var(--accent)">Guardar meta</button>
+      <p class="goal-note">Vale desde hoy: los días anteriores se siguen midiendo con la meta de antes.</p>
 
-      <div class="step">
-        <div class="step-h"><span class="step-n">2</span>¿Qué quieres?</div>
-        <div class="pace-list" id="paceList"></div>
-        <div class="field"><label>Días de entreno por semana</label>
-          <div class="chip-row train-chips" id="trainChips"></div></div>
-      </div>
-
-      <div class="step">
-        <div class="step-h"><span class="step-n">3</span>Tu meta diaria</div>
-        <div class="goal-result" id="goalResult"></div>
-        <button class="btn-primary" id="saveObjectiveBtn" type="button" style="--cat-color: var(--accent)">Guardar objetivo</button>
-      </div>
-
-      <details class="more-fields manual-goals">
-        <summary>Ajustar metas a mano</summary>
-        <p>Si las cambias, valen desde hoy: los días anteriores se siguen midiendo con las de antes.</p>
-        <div class="row-2">
-          <div class="field"><label>Calorías (kcal)</label><input type="number" id="goalKcal" inputmode="numeric" min="0"></div>
-          <div class="field"><label>Proteína (g)</label><input type="number" id="goalProtein" inputmode="numeric" min="0"></div>
-          <div class="field"><label>Carbos (g)</label><input type="number" id="goalCarbs" inputmode="numeric" min="0"></div>
-          <div class="field"><label>Grasa (g)</label><input type="number" id="goalFat" inputmode="numeric" min="0"></div>
-          <div class="field"><label>Agua (ml)</label><input type="number" id="goalWater" inputmode="numeric" min="0" step="250"></div>
+      <details class="more-fields calc-goals" id="calcGoals">
+        <summary>Calcular mi meta con mis datos</summary>
+        <div class="step">
+          <div class="step-h"><span class="step-n">1</span>Tus datos <span class="step-note">solo los ves tú</span></div>
+          <div class="chip-row sex-chips" id="sexChips">
+            <button type="button" class="chip" data-sex="hombre">Hombre</button>
+            <button type="button" class="chip" data-sex="mujer">Mujer</button>
+          </div>
+          <div class="row-3">
+            <div class="field"><label>Edad</label><input type="number" id="bodyAge" inputmode="numeric" min="10" max="100" placeholder="años"></div>
+            <div class="field"><label>Altura</label><input type="number" id="bodyHeight" inputmode="numeric" min="100" max="250" placeholder="cm"></div>
+            <div class="field"><label>Peso</label><input type="text" id="bodyWeight" inputmode="decimal" autocomplete="off" placeholder="kg"></div>
+          </div>
         </div>
-        <button class="btn-ghost" id="saveGoalsBtn" type="button">Guardar metas a mano</button>
+
+        <div class="step">
+          <div class="step-h"><span class="step-n">2</span>¿Qué quieres?</div>
+          <div class="pace-list" id="paceList"></div>
+          <div class="field"><label>Días de entreno por semana</label>
+            <div class="chip-row train-chips" id="trainChips"></div></div>
+        </div>
+
+        <div class="step">
+          <div class="step-h"><span class="step-n">3</span>Resultado</div>
+          <div class="goal-result" id="goalResult"></div>
+          <button class="btn-ghost" id="saveObjectiveBtn" type="button">Pasar a mi meta para ajustarla</button>
+        </div>
       </details>
     </div>
 
@@ -161,6 +170,11 @@
       </div>
       <div id="weightList"></div>
     </div>
+
+    <h2 class="section-title">Registros</h2>
+    <button class="data-card data-link" id="openHistoryBtn" type="button">
+      <span><b>Historial</b><small>Todo lo que registraste, día por día (60 días)</small></span><span class="dl-arrow">›</span>
+    </button>
 
     <h2 class="section-title">Cuenta</h2>
     <div class="data-card">
@@ -187,7 +201,7 @@
 <nav class="tabbar hidden" id="tabBar">
   <button class="tab-btn active" data-tab="hoy"><span class="tab-ic">◉</span><span class="tab-lb">Hoy</span></button>
   <button class="tab-btn" data-tab="habitos"><span class="tab-ic">✓</span><span class="tab-lb">Hábitos</span></button>
-  <button class="tab-btn" data-tab="historial"><span class="tab-ic">☷</span><span class="tab-lb">Historial</span></button>
+  <button class="tab-btn" data-tab="sueno"><span class="tab-ic">☾</span><span class="tab-lb">Sueño</span></button>
   <button class="tab-btn" data-tab="ranking"><span class="tab-ic">♛</span><span class="tab-lb">Ranking</span></button>
   <button class="tab-btn" data-tab="datos"><span class="tab-ic">⚙</span><span class="tab-lb">Datos</span></button>
 </nav>
@@ -214,6 +228,6 @@
     }
   })();
 </script>
-<script type="module" src="js/app.js?v=20"></script>
+<script type="module" src="js/app.js?v=23"></script>
 </body>
 </html>

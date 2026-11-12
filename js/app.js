@@ -1,26 +1,26 @@
-import { supabase } from './supabaseClient.js?v=20';
+import { supabase } from './supabaseClient.js?v=23';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js?v=20';
+} from './auth.js?v=23';
 import {
   NUTRIENT_FIELDS, MICRO_FIELDS, searchUsda, searchLocalFoods, searchFavorites, updateFood,
   cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, moveFoodLog, restoreFoodLog, copyFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel, pluralEs
-} from './foods.js?v=20';
+} from './foods.js?v=23';
 import {
   logActivity, updateActivityLog, restoreActivityLog, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking
-} from './activity.js?v=20';
-import { buildReportText, downloadText } from './report.js?v=20';
-import { BASICS, searchBasics } from './basics.js?v=20';
-import { normalizeText } from './foodDict.js?v=20';
+} from './activity.js?v=23';
+import { buildReportText, downloadText } from './report.js?v=23';
+import { BASICS, searchBasics } from './basics.js?v=23';
+import { normalizeText } from './foodDict.js?v=23';
 import {
   getGoalHistory, saveGoalsFrom, goalsForDate, getBodyProfile, saveBodyProfile, suggestGoals, PACES, paceOf, objectiveOf,
   getWeights, saveWeight, deleteWeight, getSupplements, addSupplement, retireSupplement,
   getSupplementLogs, getSupplementLogsInRange, setSupplementTaken, getWaterLogs, addWater, deleteWater,
   electrolyteTotals, getCombos, createCombo, deleteCombo
-} from './health.js?v=20';
-import { HABIT_MOMENTS, getHabits, addHabit, updateHabit, archiveHabit, getHabitLogs, setHabitDone } from './habits.js?v=20';
-import { microTargets, microTotals, microStatus } from './micros.js?v=20';
+} from './health.js?v=23';
+import { HABIT_MOMENTS, getHabits, addHabit, updateHabit, archiveHabit, getHabitLogs, setHabitDone } from './habits.js?v=23';
+import { microTargets, microTotals, microStatus } from './micros.js?v=23';
 
 /* ================= actualización automática ================= */
 /* GitHub Pages deja guardar index.html hasta 10 min y la app instalada en el
@@ -446,7 +446,9 @@ document.addEventListener('keydown', e => { if(e.key === 'Escape') dismissSheet(
     const t = e.touches[0];
     y0 = t.clientY; x0 = t.clientX; y = 0;
     const fromTop = t.clientY - sheet.getBoundingClientRect().top;
-    state = (fromTop < 44 || sheet.scrollTop <= 0) ? 'pending' : 'idle';
+    // una lista con scroll propia (ej. "Lo que más registras") ya bajada: el dedo la sube a ella
+    const inner = e.target.closest && e.target.closest('.recent-scroll');
+    state = (fromTop < 44 || (sheet.scrollTop <= 0 && !(inner && inner.scrollTop > 0))) ? 'pending' : 'idle';
     samples = [{ y: t.clientY, t: e.timeStamp }];
   }, { passive: true });
 
@@ -625,6 +627,8 @@ async function bootApp(){
   await loadPhase2Data();
   fillGoalInputs();
   fillBodyInputs();
+  // la calculadora solo se abre sola si todavía no has puesto tus datos
+  document.getElementById('calcGoals').open = !bodyProfile;
   renderWeights();
   await Promise.all([renderFavorites(), renderToday(), renderStats(), renderRanking()]);
   renderHistoryPlaceholder();
@@ -870,7 +874,7 @@ function openActivityForm(typeKey, existing = null){
       else await logActivity({ userId: user.id, type: typeKey, date, time, data: payload });
       closeForm();
       showToast(existing ? 'Cambios guardados' : 'Guardado');
-      await refreshAfterLog();
+      await afterChange();   // también repinta Sueño o Historial si están abiertos
     }catch(err){
       showToast('Error: ' + err.message);
       button.disabled = false; button.textContent = idleLabel;
@@ -918,11 +922,12 @@ async function removeActivityWithUndo(e){
 async function afterChange(){
   await refreshAfterLog();
   if(document.getElementById('panel-historial').classList.contains('active')) await renderHistory();
+  if(document.getElementById('panel-sueno').classList.contains('active')) await renderSleep();
 }
 
 /* ================= formulario: comida ================= */
-/* Como MyFitnessPal: al abrir, tus frecuentes; al escribir, tus alimentos y los
-   básicos (al instante, sin red); USDA solo si hace falta o si lo pides. */
+/* Como MyFitnessPal: al abrir, tus frecuentes; al escribir, una sola lista con
+   lo tuyo y los básicos arriba (al instante) y USDA debajo (llega después). */
 
 const MAX_MAIN_RESULTS = 8;   // lista principal corta: tus alimentos + básicos
 const MAX_USDA_RESULTS = 15;
@@ -981,11 +986,6 @@ function openFoodForm(momento){
       <div class="field">
         <input type="search" id="foodSearchInput" placeholder="Buscar: arroz, cambur, Savoy..." aria-label="Buscar alimento" autocomplete="off" enterkeyhint="search">
       </div>
-      <div class="search-tabs" role="tablist" aria-label="Dónde buscar">
-        <button type="button" class="stab" role="tab" data-stab="frecuentes">Frecuentes</button>
-        <button type="button" class="stab" role="tab" data-stab="locales">Locales</button>
-        <button type="button" class="stab" role="tab" data-stab="usda">USDA</button>
-      </div>
     </div>
     <div id="foodSearchResults"></div>
     <div class="food-extra-actions">
@@ -1007,13 +1007,13 @@ function openFoodForm(momento){
 
   const input = card.querySelector('#foodSearchInput');
   const resultsWrap = card.querySelector('#foodSearchResults');
-  wireFoodSearch(input, resultsWrap, card.querySelector('.search-tabs'));
+  wireFoodSearch(input, resultsWrap);
   input.focus();
 }
 
 /** Sin escribir nada: lo que más registras, para tocar y listo. */
 function renderRecentFoods(resultsWrap){
-  const items = usedFoods.slice(0, MAX_MAIN_RESULTS).map(withUnits);
+  const items = usedFoods.map(withUnits);   // todos (hasta 30): la caja tiene scroll
   const showCombos = !comboDraft && combos.length > 0;
   if(!items.length && !showCombos){
     resultsWrap.innerHTML = `<div class="search-empty">Escribe para buscar. Lo que registres aparecerá aquí la próxima vez.</div>`;
@@ -1030,7 +1030,7 @@ function renderRecentFoods(resultsWrap){
   }
   if(items.length){
     html += `<div class="search-section-title">Lo que más registras</div>
-      <div class="food-search-results">${foodListHtml(items)}</div>`;
+      <div class="food-search-results recent-scroll">${foodListHtml(items)}</div>`;
   }
   resultsWrap.innerHTML = html;
   resultsWrap.querySelectorAll('[data-idx]').forEach(el => {
@@ -1041,15 +1041,14 @@ function renderRecentFoods(resultsWrap){
   });
 }
 
-/* Buscador con tres pestañas: Frecuentes (lo tuyo de siempre), Locales (tus
-   alimentos y los 110 básicos, sin red) y USDA (internet). Lo escrito se
-   mantiene al cambiar de pestaña. Si la pestaña la elige la app (no tú): al
-   escribir pasa a Locales, y si ahí hay menos de 3 resultados, salta a USDA.
-   Como un multiplexor: una sola pantalla, tres fuentes. */
-function wireFoodSearch(input, resultsWrap, tabsEl){
+/* Buscador en una sola lista, como MyFitnessPal. Sin escribir: lo que más
+   registras. Al escribir, arriba lo tuyo (lo que ya registraste, tus alimentos
+   y los 110 básicos: al instante, sin esperar a internet) y debajo "Más
+   resultados" de USDA, que llegan solos un momento después. Las dos búsquedas
+   arrancan juntas, como dos canales en paralelo de un osciloscopio: la rápida
+   se pinta ya y la lenta se suma cuando llega. */
+function wireFoodSearch(input, resultsWrap){
   const st = {
-    tab: 'frecuentes',
-    auto: true,      // true = la pestaña la eligió la app; false = la tocaste tú
     q: '',
     local: null,     // { q, basics, local, loading }
     usda: null       // { q, state: 'loading' | 'done', items }
@@ -1057,132 +1056,99 @@ function wireFoodSearch(input, resultsWrap, tabsEl){
   let debounceTimer = null;
   const isLive = () => resultsWrap.isConnected;
 
-  const localMain = () => {
-    if(!st.local || st.local.q !== st.q) return [];
-    const { basics, local } = st.local;
-    // tus alimentos que ya son copia de un básico se muestran una sola vez
-    const localFdc = new Set(local.filter(f => f.source === 'usda').map(f => f.usda_fdc_id));
-    return rankFoods([...local.map(withUnits), ...basics.filter(b => !localFdc.has(b.usda_fdc_id))],
-      st.q, '', usedFoodIds).slice(0, MAX_MAIN_RESULTS);
-  };
   const freqMatches = () => {
     const words = normalizeText(st.q).split(' ').filter(Boolean);
     return usedFoods.map(withUnits).filter(f => {
       const n = normalizeText(f.name + ' ' + (f.brand || ''));
       return words.every(w => n.includes(w));
-    }).slice(0, MAX_MAIN_RESULTS);
-  };
-
-  const paintTabs = () => {
-    const searching = st.q.length >= 2;
-    const counts = {
-      frecuentes: searching ? freqMatches().length : null,
-      locales: searching && st.local && st.local.q === st.q && !st.local.loading ? localMain().length : null,
-      usda: searching && st.usda && st.usda.q === st.q && st.usda.state === 'done' ? st.usda.items.length : null
-    };
-    tabsEl.querySelectorAll('[data-stab]').forEach(b => {
-      const k = b.dataset.stab, on = k === st.tab;
-      b.classList.toggle('selected', on);
-      b.setAttribute('aria-selected', on);
-      const label = { frecuentes: 'Frecuentes', locales: 'Locales', usda: 'USDA' }[k];
-      b.innerHTML = counts[k] != null ? `${label} <span class="stab-n">${counts[k]}</span>` : label;
     });
   };
+  // lo de arriba: lo que ya registraste + tus alimentos + básicos, sin repetir
+  const mainItems = () => {
+    if(!st.local || st.local.q !== st.q) return [];
+    const seen = new Set();
+    const out = [];
+    const add = f => {
+      const k = f.id ? 'id:' + f.id : null, kf = f.usda_fdc_id ? 'fdc:' + f.usda_fdc_id : null;
+      if((k && seen.has(k)) || (kf && seen.has(kf))) return;
+      if(k) seen.add(k);
+      if(kf) seen.add(kf);
+      out.push(f);
+    };
+    freqMatches().forEach(add);              // primero: traen la cantidad de la última vez
+    st.local.local.map(withUnits).forEach(add);
+    st.local.basics.forEach(add);
+    return rankFoods(out, st.q, '', usedFoodIds).slice(0, MAX_MAIN_RESULTS);
+  };
 
-  const list = (items, title) => {
-    resultsWrap.innerHTML = (title ? `<div class="search-section-title">${title}</div>` : '')
-      + `<div class="food-search-results">${foodListHtml(items)}</div>`;
-    resultsWrap.querySelectorAll('[data-idx]').forEach(el => {
+  const sectionHtml = (title, items, attr) => `<div class="search-section-title">${title}</div>`
+    + `<div class="food-search-results" ${attr}>${foodListHtml(items)}</div>`;
+  const wire = (sel, items) => {
+    const box = resultsWrap.querySelector(sel);
+    if(!box) return;
+    box.querySelectorAll('[data-idx]').forEach(el => {
       el.addEventListener('click', () => openQuantityStep(items[Number(el.dataset.idx)]));
     });
-  };
-  const empty = (msg, withUsda) => {
-    resultsWrap.innerHTML = `<div class="search-empty">${msg}</div>`
-      + (withUsda ? `<button class="more-usda-btn" id="moreUsdaBtn" type="button">Buscar en USDA ›</button>` : '');
-    const b = resultsWrap.querySelector('#moreUsdaBtn');
-    if(b) b.addEventListener('click', () => pick('usda'));
   };
 
   const show = () => {
     if(!isLive()) return;
-    paintTabs();
-    const searching = st.q.length >= 2;
-    if(st.tab === 'frecuentes'){
-      if(!searching){ renderRecentFoods(resultsWrap); return; }
-      const items = freqMatches();
-      if(items.length) list(items, 'Ya lo has registrado');
-      else empty('No lo has registrado antes. Mira en Locales o en USDA.', false);
-    }else if(st.tab === 'locales'){
-      if(!searching){ empty('Escribe para buscar en tus alimentos y en los 110 básicos.', false); return; }
-      const items = localMain();
-      if(items.length){
-        list(items, null);
-        resultsWrap.insertAdjacentHTML('beforeend', `<button class="more-usda-btn" id="moreUsdaBtn" type="button">¿No está? Buscar en USDA ›</button>`);
-        resultsWrap.querySelector('#moreUsdaBtn').addEventListener('click', () => pick('usda'));
-      }else if(st.local && st.local.loading) resultsWrap.innerHTML = `<div class="search-empty"><span class="spinner"></span> buscando...</div>`;
-      else empty('Nada en tus alimentos ni en los básicos.', true);
-    }else{
-      if(!searching){ empty('Escribe para buscar en USDA (sirve en español o en inglés).', false); return; }
-      if(!st.usda || st.usda.q !== st.q || st.usda.state === 'loading'){
-        resultsWrap.innerHTML = `<div class="search-empty"><span class="spinner"></span> buscando en USDA...</div>`;
-        return;
-      }
-      if(st.usda.items.length) list(st.usda.items, 'Resultados de USDA');
-      else empty('USDA tampoco tiene resultados. Puedes crearlo como alimento nuevo.', false);
+    if(st.q.length < 2){ renderRecentFoods(resultsWrap); return; }
+    const main = mainItems();
+    const localLoading = !st.local || st.local.q !== st.q || st.local.loading;
+    const usdaReady = !!(st.usda && st.usda.q === st.q && st.usda.state === 'done');
+    const usdaItems = usdaReady ? st.usda.items : [];
+    let html = '';
+    if(main.length) html += sectionHtml('Tuyos y básicos', main, 'data-sec="main"');
+    const usdaTitle = main.length ? 'Más resultados · USDA' : 'Resultados de USDA';
+    if(!usdaReady){
+      html += (main.length ? `<div class="search-section-title">${usdaTitle}</div>` : '')
+        + `<div class="search-empty"><span class="spinner"></span> ${main.length || !localLoading ? 'buscando en USDA...' : 'buscando...'}</div>`;
+    }else if(usdaItems.length){
+      html += sectionHtml(usdaTitle, usdaItems, 'data-sec="usda"');
+    }else if(!main.length && !localLoading){
+      html += `<div class="search-empty">No se encontró. Puedes crearlo como alimento nuevo o usar "Agregar rápido".</div>`;
     }
+    resultsWrap.innerHTML = html;
+    wire('[data-sec="main"]', main);
+    wire('[data-sec="usda"]', usdaItems);
   };
 
-  const loadUsda = async () => {
-    const q = st.q;
-    if(q.length < 2 || (st.usda && st.usda.q === q)) { show(); return; }
+  const loadUsda = async (q) => {
+    if(st.usda && st.usda.q === q){ show(); return; }
     st.usda = { q, state: 'loading', items: [] };
-    show();
     const { rows, enQuery } = await searchUsda(q, user.email).catch(() => ({ rows: [], enQuery: '' }));
-    if(!st.usda || st.usda.q !== q) return;   // ya se escribió otra cosa
-    // fuera lo que ya está en Locales (tus copias guardadas y los básicos)
+    if(!st.usda || st.usda.q !== q || !isLive()) return;   // ya se escribió otra cosa
+    // fuera lo que ya sale arriba (tus copias guardadas y los básicos)
     const shown = st.local && st.local.q === q ? [...st.local.local, ...st.local.basics] : searchBasics(q);
     const shownFdc = new Set(shown.map(f => f.usda_fdc_id).filter(Boolean));
     const ranked = rankFoods(rows.filter(r => !shownFdc.has(r.usda_fdc_id)), q, enQuery, usedFoodIds);
     st.usda = { q, state: 'done', items: pickForDisplay(ranked, MAX_USDA_RESULTS) };
     show();
     // los nombres que no estaban en caché se traducen y se cambian en su sitio
-    st.usda.items.forEach(f => {
+    const items = st.usda.items;
+    items.forEach(f => {
       if(!f._needsTr) return;
       const before = f.name;
       translateToSpanish(f._en, user.email).then(es => {
         if(es === before || !isLive()) return;   // sin traducción (sin cuota o sin red)
         f.name = es;
         f._needsTr = false;
-        if(st.tab === 'usda') show();
+        if(st.usda && st.usda.items === items) show();
       });
     });
   };
 
-  const runLocal = async () => {
-    const q = st.q;
+  const runLocal = async (q) => {
     const seq = ++foodSearchSeq;
-    // 1) básicos: al instante, sin red; 2) tus alimentos (Supabase)
+    // básicos: al instante, sin red; tus alimentos: Supabase
     st.local = { q, basics: searchBasics(q), local: [], loading: true };
     show();
     const local = await searchLocalFoods(q).catch(() => []);
     if(seq !== foodSearchSeq || !isLive()) return;
     st.local = { ...st.local, local, loading: false };
-    // 3) si la pestaña la elige la app: nada en Locales → salta a USDA; 1 o 2
-    //    resultados → se queda (lo tuyo primero) y busca en USDA por detrás, así la
-    //    pestaña USDA ya muestra cuántos hay y abre al instante
-    const n = localMain().length;
-    if(st.auto && st.tab === 'locales' && n === 0){ st.tab = 'usda'; await loadUsda(); return; }
     show();
-    if(st.tab === 'usda' || (st.auto && n < 3)) loadUsda();
   };
-
-  function pick(tab){
-    st.tab = tab;
-    st.auto = false;
-    show();
-    if(tab === 'usda') loadUsda();
-  }
-  tabsEl.querySelectorAll('[data-stab]').forEach(b => b.addEventListener('click', () => pick(b.dataset.stab)));
 
   input.addEventListener('input', () => {
     clearTimeout(debounceTimer);
@@ -1190,15 +1156,14 @@ function wireFoodSearch(input, resultsWrap, tabsEl){
     if(q.length < 2){
       foodSearchSeq++;
       st.q = q;
-      if(st.auto) st.tab = 'frecuentes';
       show();
       return;
     }
     debounceTimer = setTimeout(() => {
       st.q = q;
-      if(st.auto && st.tab === 'frecuentes') st.tab = 'locales';
-      runLocal();
-    }, 250);
+      runLocal(q);
+      loadUsda(q);   // en paralelo: no espera a lo local
+    }, 300);
   });
   // "Buscar" del teclado: lo esconde para ver todos los resultados
   input.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); input.blur(); } });
@@ -1662,20 +1627,29 @@ function openNewFoodForm(){
 
 /* ================= tabs ================= */
 
+/** Muestra un panel. `tab` es el botón de la barra que queda encendido
+    (Historial no tiene botón propio: se abre desde Datos y deja Datos encendido). */
+function showPanel(panel, tab = panel){
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + panel));
+  document.body.dataset.tab = panel;
+  paintTodayDate();
+  window.scrollTo({ top: 0 });
+}
+
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', async () => {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
-    document.body.dataset.tab = btn.dataset.tab;
-    paintTodayDate();
-    window.scrollTo({ top: 0 });
-    if(btn.dataset.tab === 'historial') await renderHistory();
+    showPanel(btn.dataset.tab);
     if(btn.dataset.tab === 'ranking') await renderRanking();
     if(btn.dataset.tab === 'habitos') await renderHabits();
+    if(btn.dataset.tab === 'sueno') await renderSleep();
   });
 });
+document.getElementById('openHistoryBtn').addEventListener('click', async () => {
+  showPanel('historial', 'datos');
+  await renderHistory();
+});
+document.getElementById('historyBackBtn').addEventListener('click', () => showPanel('datos'));
 
 /* ================= timeline ================= */
 
@@ -2364,7 +2338,7 @@ function openSupplementsForm(){
 }
 
 function renderHistoryPlaceholder(){
-  document.getElementById('historyList').innerHTML = `<div class="empty-state">Abre esta pestaña para cargar tu historial.</div>`;
+  document.getElementById('historyList').innerHTML = '';
 }
 
 async function renderHistory(){
@@ -2393,6 +2367,87 @@ async function renderHistory(){
   }catch(err){
     wrap.innerHTML = `<div class="empty-state">Error: ${escapeHtml(err.message)}</div>`;
   }
+}
+
+/* ================= sueño (pestaña propia) ================= */
+/* Lo de las últimas noches: cuánto, qué tan bien y qué tan regular. La hora
+   de dormir se mide desde el mediodía (las 23:30 y la 01:00 quedan seguidas,
+   no en extremos opuestos del reloj), como medir una fase sin saltar en 360°. */
+
+function minsFromNoon(hhmm){
+  const [h, m] = String(hhmm).split(':').map(Number);
+  return ((h * 60 + m) - 720 + 1440) % 1440;
+}
+function clockFromNoon(mins){
+  const t = (Math.round(mins) + 720) % 1440;
+  return pad(Math.floor(t / 60)) + ':' + pad(t % 60);
+}
+const avg = xs => xs.reduce((a, b) => a + b, 0) / xs.length;
+
+async function renderSleep(){
+  const wrap = document.getElementById('sleepArea');
+  if(!wrap.innerHTML) wrap.innerHTML = `<div class="search-empty"><span class="spinner"></span> cargando...</div>`;
+  let list;
+  try{ list = (await getEntriesInRange(user.id, daysAgoStr(29), todayStr())).filter(e => e.kind === 'activity' && e.type === 'sueno'); }
+  catch(err){ wrap.innerHTML = `<div class="empty-state">Error: ${escapeHtml(err.message)}</div>`; return; }
+  const byDate = new Map(list.map(e => [e.date, e]));
+  const last = byDate.get(todayStr());
+
+  // anoche
+  let top;
+  if(last){
+    const { dur } = calcSleep(last.data);
+    top = `<div class="sl-big mono">${dur != null ? fmtDur(dur) : '—'}</div>
+      <div class="sl-sub">${escapeHtml(last.data.horaDormir || '?')} → ${escapeHtml(last.data.horaDespertar || '?')}${last.data.calidad ? ` · calidad ${last.data.calidad}/5` : ''}</div>
+      <button class="btn-link" type="button" data-sleep-edit>Cambiar</button>`;
+  }else{
+    top = `<div class="sl-sub">Todavía no registras la ${nightLabel(todayStr())}.</div>
+      <button class="btn-primary" type="button" data-sleep-edit style="--cat-color: var(--c-sueno)">Registrar anoche</button>`;
+  }
+
+  // últimos 7 días: promedios y regularidad
+  const week = [];
+  for(let i = 0; i < 7; i++){ const e = byDate.get(daysAgoStr(i)); if(e) week.push(e); }
+  const durs = week.map(e => calcSleep(e.data).dur).filter(x => x != null);
+  const quals = week.map(e => Number(e.data.calidad)).filter(Boolean);
+  const beds = week.map(e => e.data.horaDormir).filter(Boolean).map(minsFromNoon);
+  const wakes = week.map(e => e.data.horaDespertar).filter(Boolean).map(minsFromNoon);
+  const spread = xs => { const m = avg(xs); return avg(xs.map(x => Math.abs(x - m))); };
+  const stat = (label, value, note = '') => `<div class="sl-stat"><div class="sl-v mono">${value}</div><div class="sl-l">${label}</div>${note ? `<div class="sl-n">${note}</div>` : ''}</div>`;
+  let stats = '';
+  if(week.length){
+    stats = `<div class="sl-stats">
+      ${stat('duración media', durs.length ? fmtDur(Math.round(avg(durs))) : '—')}
+      ${stat('calidad media', quals.length ? String(Math.round(avg(quals) * 10) / 10).replace('.', ',') + '/5' : '—')}
+      ${stat('te duermes', beds.length ? clockFromNoon(avg(beds)) : '—', beds.length >= 2 ? `± ${Math.round(spread(beds))} min` : '')}
+      ${stat('te despiertas', wakes.length ? clockFromNoon(avg(wakes)) : '—', wakes.length >= 2 ? `± ${Math.round(spread(wakes))} min` : '')}
+    </div>
+    <p class="sl-foot">Últimos 7 días · ${week.length} noche${week.length === 1 ? '' : 's'} registrada${week.length === 1 ? '' : 's'}. El "±" es cuánto varía tu horario de una noche a otra: mientras más chico, más regular.</p>`;
+  }
+
+  // barras de las últimas 14 noches (8 h = línea de referencia)
+  const bars = [];
+  for(let i = 13; i >= 0; i--){
+    const d = daysAgoStr(i), e = byDate.get(d);
+    const dur = e ? calcSleep(e.data).dur : null;
+    const h = dur != null ? Math.min(100, (dur / 600) * 100) : 0;
+    const day = new Date(d + 'T12:00:00').toLocaleDateString('es-VE', { weekday: 'narrow' });
+    bars.push(`<div class="sl-bar" title="${dur != null ? fmtDur(dur) : 'sin registro'}"><div class="sl-fill${dur != null && dur < 420 ? ' is-short' : ''}" style="height:${h}%"></div><span>${day}</span></div>`);
+  }
+
+  const nights = list.sort((a, b) => b.date.localeCompare(a.date));
+  wrap.innerHTML = `
+    <h2 class="section-title">Anoche</h2>
+    <div class="data-card sl-top">${top}</div>
+    ${stats ? `<h2 class="section-title">Tu semana</h2><div class="data-card">${stats}</div>` : ''}
+    <h2 class="section-title">Últimas 2 semanas</h2>
+    <div class="data-card"><div class="sl-bars">${bars.join('')}</div><div class="sl-legend">La línea marca 8 h · en rojo, menos de 7 h</div></div>
+    <h2 class="section-title">Noches registradas</h2>
+    ${nights.length ? `<div class="timeline">${nights.map(entryRow).join('')}</div>` : '<div class="empty-state">Aún no hay noches registradas.</div>'}`;
+  wrap.querySelectorAll('[data-sleep-edit]').forEach(b => b.addEventListener('click', async () => {
+    if(!isViewingToday()) await setViewDate(todayStr());   // "anoche" es siempre la noche que terminó hoy
+    openActivityForm('sueno', byDate.get(todayStr()) || null);
+  }));
 }
 
 document.addEventListener('click', async (ev) => {
@@ -2811,13 +2866,37 @@ async function refreshAfterLog(){
 
 /* ================= perfil / metas ================= */
 
-function fillGoalInputs(g = goalsFor(todayStr())){
-  document.getElementById('goalKcal').value = Math.round(g.goal_kcal);
-  document.getElementById('goalProtein').value = Math.round(g.goal_protein_g);
-  document.getElementById('goalCarbs').value = Math.round(g.goal_carbs_g);
-  document.getElementById('goalFat').value = Math.round(g.goal_fat_g);
-  document.getElementById('goalWater').value = Math.round(g.goal_water_ml);
+const GOAL_INPUTS = { goal_kcal: 'goalKcal', goal_protein_g: 'goalProtein', goal_carbs_g: 'goalCarbs', goal_fat_g: 'goalFat', goal_water_ml: 'goalWater' };
+
+/** Pone la meta en los campos. dirty = viene de la calculadora y falta guardarla. */
+function fillGoalInputs(g = goalsFor(todayStr()), dirty = false){
+  Object.entries(GOAL_INPUTS).forEach(([k, id]) => { document.getElementById(id).value = Math.round(g[k]); });
+  setGoalsDirty(dirty);
 }
+function readGoalInputs(){
+  const out = {};
+  Object.entries(GOAL_INPUTS).forEach(([k, id]) => { out[k] = Number(document.getElementById(id).value); });
+  return out;
+}
+/** El botón avisa si hay cambios sin guardar (como un LED de "pendiente"). */
+function setGoalsDirty(dirty){
+  const btn = document.getElementById('saveGoalsBtn');
+  btn.classList.toggle('is-dirty', dirty);
+  btn.textContent = dirty ? 'Guardar meta (sin guardar)' : 'Guardar meta';
+  paintGoalCheck();
+}
+/** Cuántas kcal suman los macros (4/4/9), para ver si cuadran con las calorías. */
+function paintGoalCheck(){
+  const g = readGoalInputs();
+  const fromMacros = Math.round(g.goal_protein_g * 4 + g.goal_carbs_g * 4 + g.goal_fat_g * 9);
+  const el = document.getElementById('goalCheck');
+  if(!fromMacros || !g.goal_kcal){ el.textContent = ''; return; }
+  const diff = fromMacros - g.goal_kcal;
+  el.innerHTML = Math.abs(diff) <= 60
+    ? `Proteína, carbos y grasa suman <b class="mono">${fromMacros}</b> kcal: cuadra.`
+    : `Proteína, carbos y grasa suman <b class="mono">${fromMacros}</b> kcal (${diff > 0 ? '+' : '−'}${Math.abs(diff)} frente a las calorías).`;
+}
+Object.values(GOAL_INPUTS).forEach(id => document.getElementById(id).addEventListener('input', () => setGoalsDirty(true)));
 
 /** Guarda las metas en el perfil y en el historial (valen desde hoy). */
 async function saveGoals(goals){
@@ -2834,21 +2913,16 @@ async function saveGoals(goals){
 }
 
 document.getElementById('saveGoalsBtn').addEventListener('click', async () => {
-  const goals = {
-    goal_kcal: Number(document.getElementById('goalKcal').value),
-    goal_protein_g: Number(document.getElementById('goalProtein').value),
-    goal_carbs_g: Number(document.getElementById('goalCarbs').value),
-    goal_fat_g: Number(document.getElementById('goalFat').value),
-    goal_water_ml: Number(document.getElementById('goalWater').value)
-  };
+  const goals = readGoalInputs();
   if(Object.values(goals).some(v => !Number.isFinite(v) || v <= 0)){
     showToast('Todas las metas deben ser mayores a 0');
     return;
   }
   try{
     await saveGoals(goals);
+    setGoalsDirty(false);
     renderSuggestion();
-    showToast('Metas guardadas desde hoy');
+    showToast('Meta guardada desde hoy');
   }catch(err){ showToast('Error: ' + err.message); }
 });
 
@@ -2964,12 +3038,13 @@ document.getElementById('saveObjectiveBtn').addEventListener('click', async (ev)
     }
     try{ bodyProfile = await saveBodyProfile(user.id, fields); }
     catch(err){ if(err.saved){ bodyProfile = err.saved; showError(err.message); } else throw err; }
-    await saveGoals(lastSuggestion.goals);
-    fillGoalInputs(lastSuggestion.goals);
-    renderSuggestion();
-    showToast('Objetivo guardado: metas nuevas desde hoy');
+    // la meta calculada va a los campos de arriba: la ajustas y la guardas tú
+    fillGoalInputs(lastSuggestion.goals, true);
+    document.getElementById('calcGoals').open = false;
+    document.querySelector('#panel-datos .goal-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    showToast('Ajústala si quieres y toca Guardar meta');
   }catch(err){ showToast('Error: ' + err.message); }
-  finally{ btn.disabled = !lastSuggestion; btn.textContent = 'Guardar objetivo'; }
+  finally{ btn.disabled = !lastSuggestion; btn.textContent = 'Pasar a mi meta para ajustarla'; }
 });
 
 /* ================= peso corporal ================= */

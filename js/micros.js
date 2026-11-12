@@ -5,7 +5,7 @@
 //   max  = nivel máximo tolerable (UL): por encima, demasiado
 // Para sodio, azúcar y grasa saturada solo importa no pasarse (max).
 // Como una ventana de tolerancia de un componente: mínimo, nominal y máximo.
-import { NUTRIENT_FIELDS, MICRO_FIELDS } from './foods.js?v=20';
+import { NUTRIENT_FIELDS, MICRO_FIELDS } from './foods.js?v=23';
 
 // [hombre, mujer] para cada valor; null = sin ese límite
 const REF = {

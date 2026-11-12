@@ -257,12 +257,6 @@ header{
 .search-section-title:first-child{ margin-top: 0; }
 .food-result .fr-check{ color: var(--accent); font-size: 12px; font-weight: 600; margin-left: 2px; }
 .selected-food-card .fr-check{ color: var(--accent); font-size: 12px; }
-.more-usda-btn{
-  display: block; width: 100%; margin-top: 8px; padding: 11px 14px; text-align: left;
-  background: none; border: none; border-radius: var(--r-md);
-  color: var(--accent); font-size: 13px;
-}
-.more-usda-btn:active{ background: var(--surface-sunken); }
 .food-extra-actions{ display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-top: 6px; }
 .add-new-food-btn{ margin-top: 6px; font-size: 12.5px; color: var(--accent); background:none; border:none; padding: 6px 0; text-align: left; }
 
@@ -589,9 +583,15 @@ header{
 .swipe-fg{ position: relative; z-index: 1; width: 100%; display: flex; background: var(--surface); touch-action: pan-y; will-change: transform; }
 .swipe-fg .mi-main{ margin-left: 0; padding-left: 0; padding-right: 4px; }
 .btn-danger-link{ color: var(--danger); }
-.toast.has-action{ pointer-events: auto; display: flex; align-items: center; gap: 14px; padding: 6px 6px 6px 18px; }
+.toast.has-action{ display: flex; align-items: center; gap: 14px; padding: 6px 6px 6px 18px; }
 .toast-action{ background: none; border: none; color: var(--accent); font: inherit; font-weight: 600; padding: 8px 12px; border-radius: 99px; }
 .toast-action:active{ background: var(--surface-sunken); }
+/* el aviso solo recibe toques mientras se ve: invisible no debe tapar botones */
+.toast:not(.show){ visibility: hidden; pointer-events: none !important; transition: opacity 180ms ease, visibility 0s linear 180ms; }
+.toast.show.has-action{ pointer-events: auto; }
+/* "Lo que más registras": caja corta con scroll, para ver lo de abajo */
+.sheet.tall .food-search-results.recent-scroll, .food-search-results.recent-scroll{ max-height: 286px; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  border-radius: 14px; mask-image: linear-gradient(to bottom, #000 88%, transparent); -webkit-mask-image: linear-gradient(to bottom, #000 88%, transparent); }
 #panel-hoy > .favorites-row{ padding: 0 0 14px; scrollbar-width: none; }
 #panel-hoy > .favorites-row::-webkit-scrollbar{ display: none; }
 #panel-hoy > .favorites-row:empty{ display: none; }
@@ -642,8 +642,6 @@ header{
 .gr-macros{ display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin-top: 12px; }
 .gr-macros b{ color: var(--text); font-weight: 500; }
 .gr-now{ margin-top: 10px; font-size: 12px; color: var(--text-faint); }
-.manual-goals{ margin: 0 0 8px; }
-.manual-goals p{ margin: 4px 0 12px; }
 
 /* ---------- ranking: puntos ---------- */
 .rank-modes{ margin-bottom: 12px; }
@@ -709,13 +707,6 @@ header{
 .open-day{ color: var(--accent); padding-top: 10px; }
 
 /* buscador con pestañas */
-.search-tabs{ display: flex; gap: 4px; margin-top: 10px; background: var(--surface-sunken); border-radius: 99px; padding: 3px; }
-.stab{
-  flex: 1; background: none; border: none; border-radius: 99px; padding: 8px 0;
-  font-size: 13px; color: var(--text-dim); white-space: nowrap;
-}
-.stab.selected{ background: var(--surface-raised); color: var(--text); font-weight: 500; }
-.stab-n{ font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text-faint); margin-left: 2px; }
 
 /* micronutrientes: plegable, cerrado por defecto */
 .micro-acc{ background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); padding: 0 16px; margin-bottom: 18px; }
@@ -788,3 +779,40 @@ header{
 .habit-times .chip{ flex: 1; min-width: 0; padding: 10px 0; font-family: 'IBM Plex Mono', monospace; }
 .habit-times-txt{ margin: 6px 0 0; }
 .habit-moments .chip{ padding: 9px 13px; }
+
+/* ---------- Datos: meta editable arriba, calculadora escondida ---------- */
+.goal-inputs .field{ margin-bottom: 10px; }
+.goal-check{ font-size: 12px; color: var(--text-faint); margin: 2px 0 12px; min-height: 1em; }
+.goal-check b{ color: var(--text-dim); font-weight: 500; }
+.data-card .goal-note{ font-size: 12px; color: var(--text-faint); margin: 10px 0 4px; }
+#saveGoalsBtn{ width: 100%; }
+#saveGoalsBtn:not(.is-dirty){ opacity: 0.6; }
+.calc-goals{ margin: 6px 0 10px; }
+.calc-goals[open] summary{ margin-bottom: 10px; }
+#saveObjectiveBtn{ width: 100%; }
+/* fila que abre otra pantalla (Historial) */
+.data-link{ display: flex; align-items: center; justify-content: space-between; width: 100%; text-align: left;
+  border: none; color: var(--text); font: inherit; cursor: pointer; }
+.data-link b{ display: block; font-weight: 600; font-size: 14.5px; }
+.data-link small{ display: block; color: var(--text-faint); font-size: 12.5px; margin-top: 3px; }
+.data-link:active{ background: var(--surface-raised); }
+.dl-arrow{ color: var(--text-faint); font-size: 22px; }
+.back-link{ padding: 10px 0 0; font-size: 14px; }
+
+/* ---------- Sueño ---------- */
+.sl-top{ text-align: center; }
+.sl-big{ font-size: 34px; color: var(--c-sueno); font-weight: 500; }
+.sl-sub{ font-size: 13px; color: var(--text-dim); margin: 6px 0 10px; }
+.sl-top .btn-primary{ width: 100%; }
+.sl-stats{ display: grid; grid-template-columns: 1fr 1fr; gap: 14px 10px; }
+.sl-v{ font-size: 19px; color: var(--text); }
+.sl-l{ font-size: 12px; color: var(--text-faint); margin-top: 2px; }
+.sl-n{ font-size: 11.5px; color: var(--c-sueno); margin-top: 2px; }
+.data-card .sl-foot{ font-size: 11.5px; color: var(--text-faint); margin: 14px 0 0; }
+.sl-bars{ display: flex; align-items: flex-end; gap: 4px; height: 110px; position: relative; padding-bottom: 16px; }
+.sl-bars::after{ content: ''; position: absolute; left: 0; right: 0; bottom: calc(16px + 94px * 0.8); border-top: 1px dashed var(--text-faint); opacity: 0.5; }
+.sl-bar{ flex: 1; height: 94px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; position: relative; }
+.sl-fill{ width: 100%; background: var(--c-sueno); border-radius: 4px 4px 2px 2px; min-height: 2px; opacity: 0.85; }
+.sl-fill.is-short{ background: var(--danger); }
+.sl-bar span{ position: absolute; bottom: -16px; font-size: 10.5px; color: var(--text-faint); }
+.sl-legend{ font-size: 11.5px; color: var(--text-faint); margin-top: 8px; }

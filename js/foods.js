@@ -1,6 +1,6 @@
-import { supabase } from './supabaseClient.js?v=20';
-import { USDA_API_KEY } from './config.js?v=20';
-import { dictQueryToEnglish, normalizeText } from './foodDict.js?v=20';
+import { supabase } from './supabaseClient.js?v=23';
+import { USDA_API_KEY } from './config.js?v=23';
+import { dictQueryToEnglish, normalizeText } from './foodDict.js?v=23';
 
 // Campos nutricionales que manejamos en toda la app, en el orden
 // en que se muestran. Un solo lugar para no desincronizar listas.
@@ -110,12 +110,15 @@ let translateQuotaExhausted = false;
 const translateInFlight = new Map();
 
 /** Una llamada a MyMemory. Devuelve el texto traducido o null. */
-async function myMemory(text, pair, email) {
+async function myMemory(text, pair, email, timeoutMs = 0) {
   if (translateQuotaExhausted) return null;
+  // con plazo: si MyMemory tarda más, se sigue sin traducir (no se bloquea la búsqueda)
+  const ctrl = timeoutMs ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
   try {
     const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${pair}`
       + (email ? `&de=${encodeURIComponent(email)}` : '');
-    const res = await fetch(url);
+    const res = await fetch(url, ctrl ? { signal: ctrl.signal } : undefined);
     if (!res.ok) return null;
     const json = await res.json();
     const status = Number(json?.responseStatus);
@@ -127,7 +130,8 @@ async function myMemory(text, pair, email) {
       return null;
     }
     if (status === 200 && translated && !upper.includes('QUERY LENGTH LIMIT')) return translated.trim();
-  } catch (e) { /* sin red: seguimos sin traducir */ }
+  } catch (e) { /* sin red o pasó el plazo: seguimos sin traducir */ }
+  finally { if (timer) clearTimeout(timer); }
   return null;
 }
 
@@ -164,7 +168,7 @@ async function queryToEnglish(query, email) {
   if (fromDict) return fromDict;
   const key = 'es>en:' + normalizeText(query);
   if (translateCache.has(key)) return translateCache.get(key);
-  const t = await myMemory(query.trim().toLowerCase(), 'es|en', email);
+  const t = await myMemory(query.trim().toLowerCase(), 'es|en', email, 1500);
   if (!t) return query;
   const en = t.toLowerCase();
   translateCache.set(key, en);
@@ -261,15 +265,26 @@ async function usdaRequest(query, dataType, pageSize, allWords = false) {
  * (los que no están en caché vienen con _needsTr = true; app.js los
  * traduce después y los cambia en pantalla). Devuelve { rows, enQuery }.
  */
+// Búsquedas ya hechas en esta sesión: volver a escribir "arroz" no repite la espera.
+const usdaCache = new Map();
+
 export async function searchUsda(query, userEmail) {
   if (!query || query.trim().length < 2) return { rows: [], enQuery: '' };
+  const cacheKey = normalizeText(query);
+  if (usdaCache.has(cacheKey)) return usdaCache.get(cacheKey);
+  const out = await searchUsdaUncached(query, userEmail);
+  if (out.rows.length) usdaCache.set(cacheKey, out);
+  return out;
+}
+
+async function searchUsdaUncached(query, userEmail) {
   // Tres peticiones en paralelo, todas exigiendo todas las palabras en las de marca:
   //  - genéricos (Foundation/SR Legacy) con la búsqueda en inglés: USDA está en inglés.
   //  - de marca con lo que escribió el usuario: así salen productos latinos ("Savoy").
   //  - de marca con la búsqueda en inglés: "lactose free milk" (Lactaid, Natrel...).
   const brandedEsP = usdaRequest(query.trim(), 'Branded', 15, true).catch(() => []);
   const enQuery = await queryToEnglish(query, userEmail);
-  const genericP = usdaRequest(enQuery, 'Foundation,SR Legacy', 50).catch(() => []);
+  const genericP = usdaRequest(enQuery, 'Foundation,SR Legacy', 25).catch(() => []);
   const sameQuery = normalizeText(enQuery) === normalizeText(query);
   const brandedEnP = sameQuery ? Promise.resolve([]) : usdaRequest(enQuery, 'Branded', 15, true).catch(() => []);
   const [generic, brandedEs, brandedEn] = await Promise.all([genericP, brandedEsP, brandedEnP]);

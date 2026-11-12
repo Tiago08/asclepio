@@ -9,14 +9,14 @@ Estado y pendientes: página "Asclepio" en Notion (https://app.notion.com/p/40d4
 - Frontend estático en GitHub Pages: HTML, CSS y JavaScript con módulos ES. No hay build, ni npm, ni framework. Mantenlo así.
 - Supabase: Auth (código por correo), Postgres con RLS, triggers.
 - Cliente Supabase cargado desde esm.sh con versión fija y en un solo archivo: `https://esm.sh/@supabase/supabase-js@2.119.0/es2022/supabase-js.bundle.mjs` (si cambia la versión, cámbiala también en el `modulepreload` de `index.html`).
-- Buscador de comida con 3 pestañas: Frecuentes, Locales (tus alimentos y los básicos, máx. 8) y USDA. Lo escrito se mantiene al cambiar. Si la pestaña la eligió la app: al escribir pasa a Locales; con 0 resultados salta a USDA y con 1–2 busca en USDA por detrás (la pestaña muestra cuántos). Si la tocó el usuario, no cambia sola. Cantidad en gramos o porciones caseras, y "Agregar rápido" (kcal y macros a mano, sin crear alimento). Nada de funciones con IA (costo extra).
+- Buscador de comida en una sola lista, sin pestañas (Santiago no quiso las pestañas). Sin escribir: "Lo que más registras" (caja con scroll, hasta 30) y combos. Al escribir: arriba "Tuyos y básicos" (lo ya registrado, tus alimentos y los básicos, máx. 8, al instante) y debajo "Más resultados · USDA", que se busca en paralelo y llega después. USDA pide 25 genéricos (no 50: pesaba 1,7 MB), MyMemory tiene 1,5 s de plazo y las búsquedas se guardan en memoria durante la sesión. Cantidad en gramos o porciones caseras, y "Agregar rápido" (kcal y macros a mano, sin crear alimento). Nada de funciones con IA (costo extra).
 - USDA FoodData Central para buscar alimentos. La búsqueda se pasa a inglés con el diccionario de `js/foodDict.js` (o MyMemory si la palabra no está), y los nombres se traducen al español con MyMemory y caché en localStorage.
 - PWA instalable en iPhone (manifest, apple-touch-icon, safe-area).
 - Repo público (Pages gratis lo exige): Tiago08/asclepio. Sitio: https://tiago08.github.io/asclepio/
 
 ## Estructura
 
-- `index.html`: login, pestañas (Hoy, Hábitos, Historial, Ranking, Datos), hoja inferior para formularios.
+- `index.html`: login, pestañas (Hoy, Hábitos, Sueño, Ranking, Datos), hoja inferior para formularios. Historial no tiene pestaña: se abre desde Datos ("Registros › Historial", `showPanel('historial', 'datos')`) y vuelve con "‹ Datos".
 - `css/styles.css`: tema oscuro, sin bordes duros, hoja inferior, tab bar fija.
 - `js/app.js`: lógica principal y pantallas. `js/auth.js`, `js/foods.js` (búsqueda, traducción y orden por relevancia), `js/foodDict.js` (diccionario español → búsqueda en inglés), `js/basics.js` (110 básicos con valores de USDA por fdcId y porciones caseras; salen primero al buscar, como los "Best Match" de MyFitnessPal), `js/activity.js`, `js/report.js`, `js/config.js`, `js/supabaseClient.js`, `js/health.js` (fase 2: metas por día, perfil físico y cálculo de metas, peso, suplementos, agua y electrolitos, combos), `js/habits.js` (fase 3: hábitos), `js/micros.js` (fase 3: metas de micronutrientes mín/meta/máx por sexo y edad, valores DRI del NIH).
 - Micronutrientes: las 15 columnas fijas siguen igual; los nuevos (magnesio, zinc, B6, folato, omega-3) van en `micros` (JSONB) de `foods` y `food_logs`. Para agregar otro, súmalo a `MICRO_FIELDS` en `foods.js` (y a `basics.js` si quieres valores de los básicos), sin tocar la tabla.
@@ -31,12 +31,14 @@ Estado y pendientes: página "Asclepio" en Notion (https://app.notion.com/p/40d4
 - En las hojas, los botones fijos (`form-actions sticky`) van siempre al final: un enlace debajo queda tapado.
 - Días anteriores: `viewDate` (app.js) es el día que se ve en Hoy y Hábitos; las flechas de la fecha de arriba van hasta `MAX_BACK_DAYS` (7) atrás, para que nadie rellene días viejos y suba en el ranking. Todo lo que se registra en Hoy usa `viewDate`, no `todayStr()`. Con un día pasado sale el aviso `.past-banner` con "Volver a hoy". Historial tiene "Abrir este día" para esos 7 días.
 - Sueño: se guarda en el día en que te despiertas (como Apple Salud) y se muestra como noche: "Anoche" en el mosaico, "noche del 7 al 8 nov" en el formulario, la línea de tiempo y el reporte (`nightLabel`). No pide hora: `log_time` = hora de despertar.
+- Datos: arriba "Tu meta diaria" con los campos editables y "Guardar meta" (dice "sin guardar" si hay cambios). La calculadora (datos, ritmo, resultado) va escondida en "Calcular mi meta con mis datos" y solo se abre sola si no hay `body_profiles`; su botón guarda tus datos y pasa la meta calculada a los campos, sin guardarla: la guardas tú.
+- Pestaña Sueño (`renderSleep`): anoche, promedios de 7 días (duración, calidad, hora de dormir y despertar con "±" de regularidad, medida desde el mediodía para que 23:30 y 01:00 queden juntas), barras de 14 noches y la lista para editar. Puntaje de sueño y lo de Huberman: pendientes, esperan orden.
 - Micronutrientes: sección plegable en Hoy, cerrada por defecto (se recuerda en localStorage). Los que no traen datos van al final.
 - `sql/`: esquema y migraciones que Santiago ejecuta a mano en el SQL Editor de Supabase. Orden: schema, fase2, fase2b, puntos, fase3.
 
 ## Reglas de trabajo
 
-- Cache-busting: los imports y el CSS llevan `?v=N` (ahora `?v=20`). Cada vez que cambies archivos, sube N en todos los imports, en `index.html` y en `supabaseClient.js`. Si no, Chrome y la app instalada muestran archivos viejos. Además `app.js` compara su `?v` con el del `index.html` publicado al abrir o volver a la app y se recarga solo si hay versión nueva (por eso el `?v` de `app.js` en `index.html` siempre debe subir).
+- Cache-busting: los imports y el CSS llevan `?v=N` (ahora `?v=23`). Cada vez que cambies archivos, sube N en todos los imports, en `index.html` y en `supabaseClient.js`. Si no, Chrome y la app instalada muestran archivos viejos. Además `app.js` compara su `?v` con el del `index.html` publicado al abrir o volver a la app y se recarga solo si hay versión nueva (por eso el `?v` de `app.js` en `index.html` siempre debe subir).
 - Todo el texto visible va en español.
 - Los cambios de base de datos van siempre en un archivo nuevo en `sql/`, idempotente (`if not exists`, `on conflict`, etc.). Nunca edites el esquema ya ejecutado. Al terminar, di a Santiago qué archivo ejecutar y en qué orden.
 - Tablas creadas por SQL necesitan `GRANT` a `authenticated` además de las políticas RLS (ya nos mordió: "permission denied for table").
