@@ -1,0 +1,25 @@
+const fs=require('node:fs');
+const path=require('node:path');
+const assert=require('node:assert/strict');
+const uri=s=>'data:text/javascript;base64,'+Buffer.from(s).toString('base64');
+(async()=>{
+ const sleep=uri(fs.readFileSync(path.join(__dirname,'../js/sleep.js'),'utf8'));
+ const source=fs.readFileSync(path.join(__dirname,'../js/sleepPersonal.js'),'utf8').replace('./sleep.js?v=26',sleep);
+ const {personalModel,nightScore,journalPatterns}=await import(uri(source));
+ const rows=Array.from({length:70},(_,i)=>({date:new Date(Date.UTC(2026,0,i+1)).toISOString().slice(0,10),data:{horaDormir:'23:00',horaDespertar:'07:00',estres:i%5+1,descanso:5-i%5,calidad:4}}));
+ assert.equal(personalModel(rows.slice(0,20)).state,'collecting');
+ const candidate={date:'2026-04-01',data:{horaDormir:'23:00',horaDespertar:'07:00',estres:5,descanso:5}};
+ const m=personalModel(rows,candidate);
+ assert.equal(m.state,'active');assert.ok(m.mae<m.baseline*0.9);assert.ok(m.prediction<2);
+ assert.equal(personalModel(rows,{...candidate,data:{...candidate.data,descanso:1}}).prediction,m.prediction,'el resultado declarado no entra al modelo');
+ assert.equal(personalModel([...rows,{date:'2027-01-01',data:{...candidate.data,estres:1,descanso:1}}],candidate).prediction,m.prediction,'ningún dato futuro entra al modelo');
+ assert.equal(personalModel(rows,{...candidate,data:{horaDormir:'23:00',horaDespertar:'07:00'}}).prediction,undefined);
+ assert.equal(personalModel(rows.map(e=>({...e,data:{...e.data,descanso:3}})),candidate).state,'baseline');
+ assert.equal(nightScore({horaDormir:'23:00',horaDespertar:'07:00',calidad:5},480).total,100);
+ assert.ok(nightScore({horaDormir:'23:00',horaDespertar:'07:00',despierto_min:60,calidad:5},480).total<100);
+ assert.equal(nightScore({horaDormir:'23:00',horaDespertar:'07:00'},480),null);
+ assert.equal(journalPatterns(rows).length,0,'faltante no se interpreta como no');
+ const pattern=journalPatterns(rows.map((e,i)=>({...e,data:{...e.data,alcohol:i%2,descanso:i%2?2:4}})));
+ assert.equal(pattern[0].difference,-2);assert.equal(pattern[0].yes,35);
+ console.log('OK: modelo con señal, referencia constante, temporalidad, ausencia de fuga, datos faltantes, score y asociaciones. Datos sintéticos; no constituyen validación clínica.');
+})().catch(e=>{console.error(e);process.exitCode=1});

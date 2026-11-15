@@ -1,27 +1,28 @@
-import { sleepMetrics, sleepReference, sleepScore } from './sleep.js?v=25';
-import { supabase } from './supabaseClient.js?v=25';
+import { nightScore, personalModel, journalPatterns, sleepPreferences, storeSleepPreferences, wireSleepJournal, validateSleepJournal } from './sleepPersonal.js?v=26';
+import { sleepMetrics, sleepReference, sleepScore } from './sleep.js?v=26';
+import { supabase } from './supabaseClient.js?v=26';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js?v=25';
+} from './auth.js?v=26';
 import {
   NUTRIENT_FIELDS, MICRO_FIELDS, searchUsda, searchLocalFoods, searchFavorites, updateFood,
   cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, moveFoodLog, restoreFoodLog, copyFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel, pluralEs
-} from './foods.js?v=25';
+} from './foods.js?v=26';
 import {
   logActivity, updateActivityLog, restoreActivityLog, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking
-} from './activity.js?v=25';
-import { buildReportText, downloadText } from './report.js?v=25';
-import { BASICS, searchBasics } from './basics.js?v=25';
-import { normalizeText } from './foodDict.js?v=25';
+} from './activity.js?v=26';
+import { buildReportText, downloadText } from './report.js?v=26';
+import { BASICS, searchBasics } from './basics.js?v=26';
+import { normalizeText } from './foodDict.js?v=26';
 import {
   getGoalHistory, saveGoalsFrom, goalsForDate, getBodyProfile, saveBodyProfile, suggestGoals, PACES, paceOf, objectiveOf,
   getWeights, saveWeight, deleteWeight, getSupplements, addSupplement, retireSupplement,
   getSupplementLogs, getSupplementLogsInRange, setSupplementTaken, getWaterLogs, addWater, deleteWater,
   electrolyteTotals, getCombos, createCombo, deleteCombo
-} from './health.js?v=25';
-import { HABIT_MOMENTS, getHabits, addHabit, updateHabit, archiveHabit, getHabitLogs, setHabitDone } from './habits.js?v=25';
-import { microTargets, microTotals, microStatus } from './micros.js?v=25';
+} from './health.js?v=26';
+import { HABIT_MOMENTS, getHabits, addHabit, updateHabit, archiveHabit, getHabitLogs, setHabitDone } from './habits.js?v=26';
+import { microTargets, microTotals, microStatus } from './micros.js?v=26';
 
 /* ================= actualización automática ================= */
 /* GitHub Pages deja guardar index.html hasta 10 min y la app instalada en el
@@ -832,6 +833,8 @@ function openActivityForm(typeKey, existing = null){
   }
   renderFields();
 
+  if(typeKey === 'sueno') wireSleepJournal(card, data, user.id);
+
   const saveLabel = existing ? 'Guardar cambios' : 'Guardar';
   const actions = document.createElement('div');
   actions.className = 'form-actions sticky';
@@ -882,6 +885,8 @@ function openActivityForm(typeKey, existing = null){
         showToast(`Falta: ${f.label}`); return;
       }
     }
+    if(typeKey === 'sueno' && !validateSleepJournal(card)) return;
+    if(typeKey === 'sueno' && data.intentoDormir && minsBetween(data.intentoDormir,data.horaDormir) > 360){ showToast('Revisa la hora en que intentaste dormir (máximo 6 h antes de dormirte)'); return; }
     if(typeKey === 'sueno' && calcSleep(data).dur == null){
       showToast('Revisa las horas: entre 0 y 16 h, y menos minutos despierto que en cama'); return;
     }
@@ -2416,19 +2421,29 @@ async function renderSleep(){
   const wrap = document.getElementById('sleepArea');
   if(!wrap.innerHTML) wrap.innerHTML = `<div class="search-empty"><span class="spinner"></span> cargando...</div>`;
   let list;
-  try{ list = (await getEntriesInRange(user.id, daysAgoStr(29), todayStr())).filter(e => e.kind === 'activity' && e.type === 'sueno'); }
+  try{
+    const {data,error} = await supabase.from('activity_logs').select('*').eq('user_id',user.id).eq('type','sueno').gte('log_date',daysAgoStr(179)).lte('log_date',todayStr()).order('log_date',{ascending:false}).order('log_time',{ascending:false}).limit(500);
+    if(error) throw error;
+    list = [...new Map((data || []).slice().reverse().map(e => [e.log_date,{kind:'activity',type:'sueno',id:e.id,date:e.log_date,time:String(e.log_time || '').slice(0,5),data:e.data}])).values()];
+  }
   catch(err){ wrap.innerHTML = `<div class="empty-state">Error: ${escapeHtml(err.message)}</div>`; return; }
   const byDate = new Map(list.map(e => [e.date, e]));
   const last = byDate.get(todayStr());
   const reference = sleepReference(bodyProfile?.birth_year);
 
+  const prefs = sleepPreferences(user.id);
+  const nightly = last ? nightScore(last.data, prefs.hours * 60) : null;
+  const model = personalModel(list, last || {date:todayStr(),data:{}});
+  const patterns = journalPatterns(list);
   // anoche
   let top;
   if(last){
     const { dur } = calcSleep(last.data);
-    top = `<div class="sl-big mono">${dur != null ? fmtDur(dur) : '—'}</div>
+    const latency = last.data.intentoDormir ? minsBetween(last.data.intentoDormir,last.data.horaDormir) : null;
+    top = `${nightly ? `<div class="night-score"><b>${nightly.total}</b><span>/100 · Anoche</span></div><p class="sl-foot">Duración ${nightly.duration}/60 · Continuidad ${nightly.continuity}/20 · Calidad ${nightly.quality}/20</p>` : '<p>Completa horas y calidad para ver el puntaje.</p>'}<div class="sl-big mono">${dur != null ? fmtDur(dur) : '—'}</div>
       <div class="sl-sub">${escapeHtml(last.data.horaDormir || '?')} → ${escapeHtml(last.data.horaDespertar || '?')}${last.data.calidad ? ` · calidad ${last.data.calidad}/5` : ''}</div>
-      <button class="btn-link" type="button" data-sleep-edit>Cambiar</button>`;
+      <div class="night-details"><span>Despierto: ${last.data.despierto_min!=='' && last.data.despierto_min!=null ? escapeHtml(last.data.despierto_min)+' min' : 'sin registrar (se asume 0)'}</span><span>Para dormirte: ${latency!=null && latency<=360 ? latency+' min aprox.' : 'sin registrar'}</span>${last.data.descanso?`<span>Descanso al despertar: ${escapeHtml(last.data.descanso)}/5</span>`:''}</div>
+      <button class="btn-link" type="button" data-sleep-edit>Editar noche y diario</button>`;
   }else{
     top = `<div class="sl-sub">Todavía no registras la ${nightLabel(todayStr())}.</div>
       <button class="btn-primary" type="button" data-sleep-edit style="--cat-color: var(--c-sueno)">Registrar anoche</button>`;
@@ -2469,11 +2484,14 @@ async function renderSleep(){
   wrap.innerHTML = `
     <h2 class="section-title">Anoche</h2>
     <div class="data-card sl-top">${top}</div>
+    <div class="data-card"><h4>Tu próxima noche</h4><p>Elige tu horario. Es un plan orientativo basado en tu objetivo.</p><div class="row-2"><div class="field"><label for="sleepWake">Despertar</label><input type="time" id="sleepWake" value="${prefs.wake}"></div><div class="field"><label for="sleepHours">Objetivo de sueño</label><select id="sleepHours">${[6,6.5,7,7.5,8,8.5,9,9.5,10].map(h=>`<option value="${h}" ${h===prefs.hours?'selected':''}>${String(h).replace('.',',')} h</option>`).join('')}</select></div></div><p id="sleepPlan" role="status"></p><p class="form-hint">El puntaje de anoche compara tu duración con este objetivo. La calidad es la que tú declaras. No mide fases del sueño.</p><p class="form-hint">${reference.label}.</p></div>
+    <div class="data-card"><h4>Lo que aprendes de ti</h4><p>Asociaciones de tus últimos 180 días. No demuestran causa y efecto.</p>${patterns.length ? patterns.map(p=>`<p><b>${escapeHtml(p.label)}</b><br>${p.difference>=0?'+':''}${p.difference.toFixed(1).replace('.',',')} puntos de descanso /5 con «sí» frente a «no» · ${p.yes} y ${p.no} noches. Confianza exploratoria.</p>`).join('') : '<p>Registra descanso al despertar y hábitos. Cada comparación necesita al menos 8 noches con «sí» y 8 con «no».</p>'}</div>
+    <div class="data-card sleep-model"><h4>Tu modelo personal <span class="model-badge">Experimental</span></h4>${model.state==='collecting'?`<p>Recopilando datos: ${model.count}/40 noches anteriores con horas y descanso al despertar.</p>`:`<p>${model.state==='active'?'Modelo habilitado':'Tu promedio sigue siendo la referencia más fiable'}. ${model.count} noches.</p>${model.mae!=null?`<p>Error medio en las 10 noches más recientes: modelo ${model.mae.toFixed(2)} frente a promedio ${model.baseline.toFixed(2)} puntos /5.</p>`:''}`}${model.prediction!=null?`<p class="sl-v">Descanso estimado de anoche: ${model.prediction.toFixed(1)}/5</p><p>Predicción calculada con noches anteriores, sin usar tu descanso declarado de anoche. Error histórico medio: ±${model.mae.toFixed(1)} puntos; no es un intervalo garantizado.</p>`:model.missing?'<p>Completa los factores de anoche para obtener una estimación.</p>':''}<details class="more-fields"><summary>Cómo aprende</summary><p>Regresión con regularización entrenada en tu dispositivo. Usa duración y factores suficientemente registrados (estrés, cafeína, alcohol, siesta y ejercicio tarde). Los vacíos se mantienen como desconocidos y se imputan con el promedio de entrenamiento. Cada noche de prueba usa únicamente noches anteriores. Solo se habilita si reduce el error al menos un 10 % frente a tu promedio; 40 noches son un umbral inicial, no una garantía de fiabilidad. Usa solo tu historial. No hay API de IA ni costo por predicción.</p></details></div>
     ${stats ? `<h2 class="section-title">Tu semana</h2><div class="data-card">${stats}</div>` : ''}
     <h2 class="section-title">Últimas 2 semanas</h2>
     <div class="data-card"><div class="sl-bars" style="--sleep-line:${reference.target / 720}">${bars.join('')}</div><div class="sl-legend">Línea: ${fmtDur(reference.target)} · rojo: menos de ${fmtDur(reference.min)} · toca una noche para ver el detalle.</div><p class="sl-foot">${reference.label}. Sin registro no significa que no dormiste.</p><p id="sleepBarDetail" role="status"></p></div>
     <div class="data-card sleep-score">
-      <h4>Tu constancia esta semana</h4>
+      <h4>Tu puntaje semanal</h4>
       ${score ? `<div class="sl-big mono">${score.total}<small>/100</small></div><p>${score.nights} noches con duración y calidad completas.</p>` : '<p>Registra al menos 3 noches con horas y calidad en los últimos 7 días para ver el puntaje.</p>'}
       <details class="more-fields"><summary>Cómo se calcula</summary><p>Indicador propio de Asclepio, orientativo y no clínico. No mide sueño profundo ni sustituye cómo te sientes.</p><ul>
         <li>Duración: hasta 50 puntos por alcanzar ${fmtDur(reference.min)}; dormir más no suma extra.${score ? ` Ahora: ${score.duration}/50.` : ''}</li>
@@ -2491,6 +2509,26 @@ async function renderSleep(){
     </details>
     <h2 class="section-title">Noches registradas</h2>
     ${nights.length ? `<div class="timeline">${nights.map(entryRow).join('')}</div>` : '<div class="empty-state">Aún no hay noches registradas.</div>'}`;
+  const updatePlan = () => {
+    const wake = wrap.querySelector('#sleepWake').value;
+    const hours = Number(wrap.querySelector('#sleepHours').value);
+    if(!wake) return;
+    prefs.wake = wake; prefs.hours = hours;
+    const gaps = list.slice().sort((a,b)=>b.date.localeCompare(a.date)).slice(0,14).map(e=>{
+      if(!e.data.intentoDormir) return null;
+      const latency=minsBetween(e.data.intentoDormir,e.data.horaDormir);
+      return latency<=360?latency+Number(e.data.despierto_min||0):null;
+    }).filter(v=>v!=null && Number.isFinite(v));
+    const allowance = gaps.length>=3 ? Math.round(avg(gaps)) : 30;
+    const bedtime = (toMin(wake)-hours*60-allowance+2880)%1440;
+    const saved = storeSleepPreferences(user.id,prefs);
+    wrap.querySelector('#sleepPlan').textContent = `Intenta dormir a las ${pad(Math.floor(bedtime/60))}:${pad(bedtime%60)} para levantarte a las ${wake}. Margen de ${allowance} min ${gaps.length>=3?'según tus registros':'inicial para conciliar el sueño y despertares'}.${saved?'':' No se pudo recordar tu configuración en este dispositivo.'}`;
+    const current = last ? nightScore(last.data,hours*60) : null;
+    if(current){ wrap.querySelector('.night-score b').textContent=current.total; wrap.querySelector('.sl-top .sl-foot').textContent=`Duración ${current.duration}/60 · Continuidad ${current.continuity}/20 · Calidad ${current.quality}/20`; }
+  };
+  wrap.querySelector('#sleepWake').addEventListener('change',updatePlan);
+  wrap.querySelector('#sleepHours').addEventListener('change',updatePlan);
+  updatePlan();
   wrap.querySelectorAll('[data-sleep-day]').forEach(b => b.addEventListener('click', () => {
     const e = byDate.get(b.dataset.sleepDay);
     const dur = e ? calcSleep(e.data).dur : null;

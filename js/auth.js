@@ -1,4 +1,4 @@
-import { supabase } from './supabaseClient.js?v=25';
+import { supabase } from './supabaseClient.js?v=26';
 
 /**
  * Pide un magic link al correo dado. Supabase crea la cuenta

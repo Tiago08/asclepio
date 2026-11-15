@@ -120,6 +120,11 @@ export const supabase = {
   assert.match(await page.locator('.sleep-score').textContent(),/96/);
   await page.locator('[data-sleep-day]').last().click();
   assert.match(await page.locator('#sleepBarDetail').textContent(),/8 h/);
+  assert.match(await page.locator('.night-score').textContent(),/100/);
+  await page.getByLabel('Objetivo de sueño').selectOption('9');
+  assert.match(await page.locator('.night-score').textContent(),/89/);
+  await page.getByLabel('Objetivo de sueño').selectOption('8');
+  assert.match(await page.locator('.sleep-model').textContent(),/0\/40/);
   await page.locator('[data-sleep-edit]').click();
   const times=page.locator('#formArea input[type="time"]');
   await times.nth(1).fill('07:00');
@@ -128,28 +133,43 @@ export const supabase = {
   assert.equal(await page.locator('#saveBtn').isVisible(),true);
   await times.nth(1).fill('23:30');
   await times.nth(2).fill('07:30');
-  await page.locator('#formArea input[type="number"]').fill('30');
+  await page.locator('#formArea input[type="number"]').first().fill('30');
+  await page.locator('.sleep-journal > summary').click();
+  await page.locator('#journal_descanso').fill('6');
+  await page.locator('#saveBtn').click();
+  assert.equal(await page.locator('#saveBtn').isVisible(),true);
+  await page.locator('#journal_descanso').fill('4');
+  await page.locator('#journal_estres').fill('2');
+  await page.locator('.journal-settings summary').click();
+  await page.locator('[data-track="ruido"]').check();
+  await page.locator('.journal-settings summary').click();
+  await page.locator('#journal_ruido').selectOption('1');
+  if(process.env.SCREENSHOT_DIR) await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR,'diario.png')});
   await page.locator('#saveBtn').click();
   await page.waitForFunction(()=>window.db.activity_logs[0].data.despierto_min==='30');
+  assert.equal(await page.evaluate(()=>window.db.activity_logs[0].data.descanso),'4');
+  assert.equal(await page.evaluate(()=>window.db.activity_logs[0].data.alcohol),undefined);
+  assert.equal(await page.evaluate(()=>window.db.activity_logs[0].data.ruido),'1');
+  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('asclepio_sleep_test-user')).fields.includes('ruido')),true);
   assert.equal(await page.evaluate(()=>window.db.activity_logs[0].data.duracion_h),7.5);
   await page.locator('button[data-tab="ranking"]').click();
-  const ranking=await page.evaluate(async()=> (await import('/js/activity.js?v=25')).getRanking('2000-01-01'));
+  const ranking=await page.evaluate(async()=> (await import('/js/activity.js?v=26')).getRanking('2000-01-01'));
   assert.equal(ranking[0].points_total,1100);
   for(const tab of ['hoy','habitos','sueno','ranking','datos']){
    await page.locator('button[data-tab="'+tab+'"]').click();
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=390),true,tab+' sin desbordamiento');
   }
   const metrics=await page.evaluate(async()=>{
-   const m=await import('/js/sleep.js?v=25');
+   const m=await import('/js/sleep.js?v=26');
    return [m.sleepMetrics({horaDormir:'23:30',horaDespertar:'07:00',despierto_min:30}),m.sleepMetrics({horaDormir:'07:00',horaDespertar:'07:00'}),m.sleepScore([],420)];
   });
   assert.equal(metrics[0].dur,420);assert.equal(metrics[1].dur,null);assert.equal(metrics[2],null);
-  const invalid=await page.evaluate(async()=> (await import('/js/health.js?v=25')).suggestGoals({sex:'hombre',height_cm:175,birth_year:2020,training_days:3},75));
+  const invalid=await page.evaluate(async()=> (await import('/js/health.js?v=26')).suggestGoals({sex:'hombre',height_cm:175,birth_year:2020,training_days:3},75));
   assert.equal(invalid,null);
   // Límites del cálculo y sueño cruzando medianoche, sin datos suficientes.
   const boundary=await page.evaluate(async()=>{
-   const {suggestGoals}=await import('/js/health.js?v=25');
-   const {sleepMetrics,sleepScore}=await import('/js/sleep.js?v=25');
+   const {suggestGoals}=await import('/js/health.js?v=26');
+   const {sleepMetrics,sleepScore}=await import('/js/sleep.js?v=26');
    const s=suggestGoals({sex:'hombre',height_cm:175.5,birth_year:2001,training_days:0,pace_kg_week:-0.75},74.5,2026);
    return {floor:s.goals.goal_kcal>=10*74.5+6.25*175.5-5*25+5,
     awake:sleepMetrics({horaDormir:'23:00',horaDespertar:'07:00',despierto_min:480}).dur,
