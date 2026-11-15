@@ -1,4 +1,4 @@
-import { supabase } from './supabaseClient.js?v=23';
+import { supabase } from './supabaseClient.js?v=24';
 
 /**
  * Pide un magic link al correo dado. Supabase crea la cuenta
@@ -57,15 +57,17 @@ export function onAuthChange(callback) {
  * esto es solo una red de seguridad.
  */
 export async function ensureProfile(user) {
-  const { data: existing } = await supabase
+  const { data: existing, error } = await supabase
     .from('profiles')
     .select('id')
     .eq('id', user.id)
     .maybeSingle();
+  if (error) throw error;
 
   if (!existing) {
     const displayName = (user.email || 'usuario').split('@')[0];
-    await supabase.from('profiles').insert({ id: user.id, display_name: displayName });
+    const { error: insertError } = await supabase.from('profiles').insert({ id: user.id, display_name: displayName });
+    if (insertError && insertError.code !== '23505') throw insertError;
   }
 }
 

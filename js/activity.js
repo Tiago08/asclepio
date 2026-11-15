@@ -1,4 +1,4 @@
-import { supabase } from './supabaseClient.js?v=23';
+import { supabase } from './supabaseClient.js?v=24';
 
 export async function logActivity({ userId, type, date, time, data }) {
   const { data: row, error } = await supabase
@@ -59,6 +59,27 @@ function mergeEntries(activity, foods) {
   return [...a, ...f].sort((x, y) => (x.date + x.time).localeCompare(y.date + y.time));
 }
 
+async function rankingProfiles(){
+  let result = await supabase.from('ranking_profiles').select('id, display_name, streak_current, streak_best');
+  // Compatibilidad mientras Santiago ejecuta privacidad_perfiles.sql.
+  if(result.error && ['42P01', 'PGRST205'].includes(result.error.code)){
+    result = await supabase.from('profiles').select('id, display_name, streak_current, streak_best');
+  }
+  return result;
+}
+
+// Supabase limita cada respuesta: el total debe recorrer todas las páginas.
+async function allPoints(){
+  const rows = [];
+  for(let offset = 0; ; offset += 500){
+    const result = await supabase.from('daily_points').select('user_id, log_date, points')
+      .order('log_date', { ascending: false }).order('user_id').range(offset, offset + 499);
+    if(result.error) return result;
+    rows.push(...(result.data || []));
+    if((result.data || []).length < 500) return { data: rows, error: null };
+  }
+}
+
 /**
  * Ranking: nombre y racha de cada perfil, más sus puntos de la semana
  * (desde weekStart) y totales. Si aún no se corrió sql/puntos.sql, la
@@ -66,10 +87,8 @@ function mergeEntries(activity, foods) {
  */
 export async function getRanking(weekStart) {
   const [{ data, error }, pts] = await Promise.all([
-    supabase.from('profiles').select('id, display_name, streak_current, streak_best'),
-    // lo más reciente primero: si algún día pasa del tope de filas de Supabase
-    // (1000), lo que se pierde es lo más viejo, nunca la semana actual
-    supabase.from('daily_points').select('user_id, log_date, points').order('log_date', { ascending: false })
+    rankingProfiles(),
+    allPoints()
   ]);
   if (error) throw error;
   const hasPoints = !pts.error;

@@ -816,3 +816,20 @@ header{
 .sl-fill.is-short{ background: var(--danger); }
 .sl-bar span{ position: absolute; bottom: -16px; font-size: 10.5px; color: var(--text-faint); }
 .sl-legend{ font-size: 11.5px; color: var(--text-faint); margin-top: 8px; }
+
+/* Calculadora por pasos y lectura del diario de sueño. */
+[hidden]{ display: none !important; }
+.wizard-progress{ color: var(--accent) !important; font-size: 13px; }
+.wizard-actions{ display: flex; gap: 10px; padding: 8px 0 14px; }
+.wizard-actions button{ flex: 1; min-height: 44px; }
+.calc-goals > summary{ padding: 14px 0; color: var(--accent); }
+#goalStatus{ color: var(--accent); font-size: 13px; margin-top: 0; }
+.sl-bar{ padding: 0; border: 0; background: transparent; cursor: pointer; min-width: 0; }
+.sl-bars::after{ bottom: calc(16px + 94px * var(--sleep-line, 0.6667)); pointer-events: none; }
+.sl-fill{ min-height: 0; }
+.sleep-score .sl-big small{ font-size: 17px; color: var(--text-dim); }
+.sleep-score li, .sleep-guide li{ margin: 10px 0; line-height: 1.6; font-size: 13px; color: var(--text-dim); }
+.sleep-guide summary{ cursor: pointer; font-size: 15px; padding: 4px 0; }
+.sleep-sources a{ color: var(--c-sueno); }
+#sleepBarDetail{ min-height: 1.5em; font-size: 12px; }
+button:focus-visible, summary:focus-visible{ outline: 2px solid var(--accent); outline-offset: 3px; }

@@ -1,4 +1,4 @@
-import { NUTRIENT_FIELDS, MICRO_FIELDS, foodLogLabel } from './foods.js?v=23';
+import { NUTRIENT_FIELDS, MICRO_FIELDS, foodLogLabel } from './foods.js?v=24';
 
 function fmtNum(v){
   if(v === null || v === undefined) return '—';
@@ -51,7 +51,7 @@ export function buildReportText({ displayName, fromDate, toDate, entries, goalsF
       } else if(e.type === 'sueno'){
         const d = e.data;
         const dur = d.duracion_h != null ? `, duración ${d.duracion_h} h` : '';
-        const lat = d.latencia_min != null ? `, latencia ${d.latencia_min} min` : '';
+        const lat = d.latencia_min != null ? `, tiempo sin teléfono ${d.latencia_min} min` : '';
         lines.push(`- [${e.time}] Sueño de la noche anterior (se despertó este día): dejó el teléfono ${d.dejoTelefono || '?'}, durmió ${d.horaDormir || '?'} → ${d.horaDespertar || '?'}${dur}${lat}, calidad ${d.calidad || '?'}/5`);
       } else if(e.type === 'energia'){
         const d = e.data;

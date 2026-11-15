@@ -1,26 +1,27 @@
-import { supabase } from './supabaseClient.js?v=23';
+import { sleepMetrics, sleepReference, sleepScore } from './sleep.js?v=24';
+import { supabase } from './supabaseClient.js?v=24';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js?v=23';
+} from './auth.js?v=24';
 import {
   NUTRIENT_FIELDS, MICRO_FIELDS, searchUsda, searchLocalFoods, searchFavorites, updateFood,
   cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, moveFoodLog, restoreFoodLog, copyFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel, pluralEs
-} from './foods.js?v=23';
+} from './foods.js?v=24';
 import {
   logActivity, updateActivityLog, restoreActivityLog, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking
-} from './activity.js?v=23';
-import { buildReportText, downloadText } from './report.js?v=23';
-import { BASICS, searchBasics } from './basics.js?v=23';
-import { normalizeText } from './foodDict.js?v=23';
+} from './activity.js?v=24';
+import { buildReportText, downloadText } from './report.js?v=24';
+import { BASICS, searchBasics } from './basics.js?v=24';
+import { normalizeText } from './foodDict.js?v=24';
 import {
   getGoalHistory, saveGoalsFrom, goalsForDate, getBodyProfile, saveBodyProfile, suggestGoals, PACES, paceOf, objectiveOf,
   getWeights, saveWeight, deleteWeight, getSupplements, addSupplement, retireSupplement,
   getSupplementLogs, getSupplementLogsInRange, setSupplementTaken, getWaterLogs, addWater, deleteWater,
   electrolyteTotals, getCombos, createCombo, deleteCombo
-} from './health.js?v=23';
-import { HABIT_MOMENTS, getHabits, addHabit, updateHabit, archiveHabit, getHabitLogs, setHabitDone } from './habits.js?v=23';
-import { microTargets, microTotals, microStatus } from './micros.js?v=23';
+} from './health.js?v=24';
+import { HABIT_MOMENTS, getHabits, addHabit, updateHabit, archiveHabit, getHabitLogs, setHabitDone } from './habits.js?v=24';
+import { microTargets, microTotals, microStatus } from './micros.js?v=24';
 
 /* ================= actualización automática ================= */
 /* GitHub Pages deja guardar index.html hasta 10 min y la app instalada en el
@@ -172,19 +173,8 @@ function fmtDur(mins){
   return m === 0 ? `${h} h` : `${h} h ${m} min`;
 }
 
-// duración total y latencia (tiempo entre soltar el teléfono y dormirse)
-function calcSleep(d){
-  const out = { dur: null, lat: null };
-  if(d.horaDormir && d.horaDespertar){
-    const m = minsBetween(d.horaDormir, d.horaDespertar);
-    if(m > 0 && m <= 16 * 60) out.dur = m;
-  }
-  if(d.dejoTelefono && d.horaDormir){
-    const m = minsBetween(d.dejoTelefono, d.horaDormir);
-    if(m <= 6 * 60) out.lat = m;   // más de 6 h probablemente significa que soltó el teléfono después de dormir
-  }
-  return out;
-}
+// Duración estimada y tiempo entre dejar el teléfono y dormir (no es latencia clínica).
+const calcSleep = sleepMetrics;
 
 /* ================= config por tipo de actividad (no-comida) ================= */
 
@@ -229,30 +219,32 @@ const TYPES = {
   sueno: {
     label: 'Sueño', icon: '🌙', color: 'var(--c-sueno)',
     fields: [
-      { key:'dejoTelefono', label:'Dejaste el teléfono', type:'time' },
-      { key:'horaDormir', label:'Te dormiste', type:'time' },
-      { key:'horaDespertar', label:'Te despertaste', type:'time' },
+      { key:'dejoTelefono', label:'Dejaste el teléfono (opcional)', type:'time' },
+      { key:'horaDormir', label:'Te dormiste', type:'time', required:true },
+      { key:'horaDespertar', label:'Te despertaste', type:'time', required:true },
+      { key:'despierto_min', label:'Minutos despierto durante la noche (opcional)', type:'number', placeholder:'0' },
       { key:'_calc', type:'calc' },
-      { key:'calidad', label:'Calidad', type:'scale', max:5, default:3 }
+      { key:'calidad', label:'Cómo descansaste · 1 muy mal, 5 muy bien', type:'scale', max:5, default:3 }
     ],
     calc: d => {
       const { dur, lat } = calcSleep(d);
-      if(dur == null && lat == null) return 'Completa las horas para calcular duración y latencia.';
+      if(dur == null && lat == null) return 'Completa las horas para estimar el tiempo dormido.';
       const parts = [];
-      parts.push(dur != null ? `Dormiste <b>${fmtDur(dur)}</b>` : 'Duración: falta hora de dormir o despertar');
-      parts.push(lat != null ? `Tardaste <b>${fmtDur(lat)}</b> en dormirte tras soltar el teléfono` : 'Latencia: falta hora de soltar el teléfono');
+      parts.push(dur != null ? `Dormiste <b>${fmtDur(dur)}</b>` : 'Revisa las horas y los minutos despierto');
+      parts.push(lat != null ? `<b>${fmtDur(lat)}</b> entre dejar el teléfono y dormir` : 'Dejar el teléfono es opcional; no mide cuánto tardas en conciliar el sueño');
       return parts.join('<br>');
     },
     finalize: d => {
       const { dur, lat } = calcSleep(d);
       const out = { ...d };
+      delete out.duracion_h; delete out.latencia_min;
       if(dur != null) out.duracion_h = Math.round(dur / 6) / 10;   // horas con 1 decimal
       if(lat != null) out.latencia_min = lat;
       return out;
     },
     summary: d => {
       const dur = d.duracion_h != null ? ` · ${d.duracion_h} h` : '';
-      const lat = d.latencia_min != null ? ` · latencia ${d.latencia_min} min` : '';
+      const lat = d.latencia_min != null ? ` · sin teléfono ${d.latencia_min} min` : '';
       return `${d.horaDormir || '?'} → ${d.horaDespertar || '?'}${dur}${lat}${d.calidad ? ' · calidad ' + d.calidad + '/5' : ''}`;
     }
   },
@@ -889,6 +881,9 @@ function openActivityForm(typeKey, existing = null){
         showToast(`Falta: ${f.label}`); return;
       }
     }
+    if(typeKey === 'sueno' && calcSleep(data).dur == null){
+      showToast('Revisa las horas: entre 0 y 16 h, y menos minutos despierto que en cama'); return;
+    }
     // "Guardar" (no el descanso) siempre es "sí fui", aunque antes dijera descanso
     const full = { ...data, ...(t.base || {}) };
     const payload = t.finalize ? t.finalize(full) : full;
@@ -1171,6 +1166,31 @@ function wireFoodSearch(input, resultsWrap){
   show();
 }
 
+// Conserva el texto mientras se escribe (incluido «1,»); convierte solo al leer.
+function foodDecimal(value){
+  const text = String(value).trim();
+  if(!text) return 0;
+  if(!/^(?:\d+(?:[.,]\d*)?|[.,]\d+)$/.test(text)) return NaN;
+  const number = Number(text.replace(',', '.'));
+  return Number.isFinite(number) ? number : NaN;
+}
+function validateFoodDecimals(card){
+  const invalid = [...card.querySelectorAll('input[inputmode="decimal"]')]
+    .find(input => !Number.isFinite(foodDecimal(input.value)));
+  if(!invalid){
+    const incomplete = [...card.querySelectorAll('.unit-edit-row')].find(row => {
+      const label = row.querySelector('[data-unit-label]').value.trim();
+      const grams = row.querySelector('[data-unit-grams]').value.trim();
+      return (label || grams) && (!label || !(foodDecimal(grams) > 0));
+    });
+    if(incomplete){ showToast('Completa el nombre y los gramos de cada porción, o deja ambos vacíos'); return false; }
+    return true;
+  }
+  showToast('Escribe un número válido, con coma o punto decimal');
+  invalid.focus();
+  return false;
+}
+
 /* ---- paso de cantidad: unidades caseras y cálculo en vivo ---- */
 
 /** Unidades posibles para un alimento: [{ label, grams|null, def }] (grams null = porción). */
@@ -1233,7 +1253,7 @@ async function openQuantityStep(foodResult){
     <div class="field">
       <label>Cantidad</label>
       <div class="qty-row">
-        <input type="number" id="f_qty" value="${startAmount}" min="0" step="any" inputmode="decimal">
+        <input type="text" id="f_qty" value="${startAmount}" inputmode="decimal">
         <div class="chip-row unit-chips">
           ${units.map((u, i) => `<button type="button" class="chip${u === unit ? ' selected' : ''}" data-unit="${i}">${escapeHtml(u.label)}${u.grams && u.label !== 'g' ? ` <span class="chip-g">${Math.round(u.grams)} g</span>` : ''}</button>`).join('')}
         </div>
@@ -1254,9 +1274,9 @@ async function openQuantityStep(foodResult){
   const calc = card.querySelector('#qtyCalc');
   const fmt = v => (v == null ? '–' : Math.round(v));
   const updateCalc = () => {
-    const q = quantityFor(f, unit, Number(qtyInput.value) || 0);
+    const q = quantityFor(f, unit, foodDecimal(qtyInput.value) || 0);
     const v = k => (f[k] == null ? null : Number(f[k]) * q);
-    const grams = unit.grams != null ? Math.round((Number(qtyInput.value) || 0) * unit.grams) : null;
+    const grams = unit.grams != null ? Math.round((foodDecimal(qtyInput.value) || 0) * unit.grams) : null;
     calc.innerHTML = `<b>${fmt(v('kcal'))} kcal</b>${grams != null && unit.label !== 'g' ? ` · ${grams} g` : ''}
       <br>Proteína <b>${fmt(v('protein_g'))} g</b> · Carbos <b>${fmt(v('carbs_g'))} g</b> · Grasa <b>${fmt(v('fat_g'))} g</b>`;
   };
@@ -1278,7 +1298,8 @@ async function openQuantityStep(foodResult){
   card.querySelector('#changeFoodBtn').addEventListener('click', openFoodForm);
   card.querySelector('#cancelBtn').addEventListener('click', inCombo ? openComboBuilder : closeForm);
   card.querySelector('#saveBtn').addEventListener('click', async () => {
-    const amount = Number(qtyInput.value);
+    if(!validateFoodDecimals(card)) return;
+    const amount = foodDecimal(qtyInput.value);
     if(!(amount > 0)){ showToast('Escribe una cantidad'); return; }
     const saveBtn = card.querySelector('#saveBtn');
     const idleLabel = saveBtn.textContent;
@@ -1319,13 +1340,13 @@ function unitsRowsHtml(units){
   return rows.map(u => `
     <div class="unit-edit-row">
       <input type="text" data-unit-label placeholder="unidad, taza…" value="${escapeHtml(u.label || '')}">
-      <input type="number" data-unit-grams inputmode="decimal" min="0" step="any" placeholder="gramos" value="${u.grams || ''}">
+      <input type="text" data-unit-grams inputmode="decimal" placeholder="gramos" value="${u.grams || ''}">
     </div>`).join('');
 }
 function readUnits(container){
   return [...container.querySelectorAll('.unit-edit-row')].map(r => ({
     label: r.querySelector('[data-unit-label]').value.trim(),
-    grams: Number(r.querySelector('[data-unit-grams]').value)
+    grams: foodDecimal(r.querySelector('[data-unit-grams]').value)
   })).filter(u => u.label && u.grams > 0);
 }
 function wireUnitsEditor(card){
@@ -1343,7 +1364,7 @@ function openUnitsEditor(food){
     <h3><span>🥄</span> Porciones caseras</h3>
     <p class="form-hint">${escapeHtml(food.name)}. Para calcular, la app necesita saber cuánto pesa tu porción de referencia (${escapeHtml(food.serving_label)}).</p>
     <div class="field"><label>Peso de "${escapeHtml(food.serving_label)}" (g)</label>
-      <input type="number" id="ue_serving_g" inputmode="decimal" min="0" step="any" value="${food.serving_grams || ''}" placeholder="Ej: 98"></div>
+      <input type="text" id="ue_serving_g" inputmode="decimal" value="${food.serving_grams || ''}" placeholder="Ej: 98"></div>
     <div class="field"><label>Porciones (nombre y gramos)</label><div id="unitRows">${unitsRowsHtml(food._units)}</div></div>
     <button class="add-new-food-btn" id="addUnitRowBtn" type="button">+ otra porción</button>
     <div class="form-actions">
@@ -1354,7 +1375,8 @@ function openUnitsEditor(food){
   wireUnitsEditor(card);
   card.querySelector('#cancelBtn').addEventListener('click', () => openQuantityStep(food));
   card.querySelector('#saveBtn').addEventListener('click', async (ev) => {
-    const servingG = Number(card.querySelector('#ue_serving_g').value);
+    if(!validateFoodDecimals(card)) return;
+    const servingG = foodDecimal(card.querySelector('#ue_serving_g').value);
     const units = readUnits(card);
     if(units.length && !(servingG > 0)){ showToast('Falta el peso de la porción de referencia'); return; }
     ev.currentTarget.disabled = true;
@@ -1409,6 +1431,7 @@ function openComboBuilder(){
   }));
   card.querySelector('#cancelBtn').addEventListener('click', () => { comboDraft = null; openFoodForm(); });
   card.querySelector('#saveBtn').addEventListener('click', async (ev) => {
+    if(!validateFoodDecimals(card)) return;
     const name = d.name.trim();
     if(!name){ showToast('Ponle un nombre al combo'); return; }
     if(!d.items.length){ showToast('Agrega al menos un alimento'); return; }
@@ -1460,6 +1483,7 @@ function openComboLog(combo){
     }catch(err){ showToast('Error: ' + err.message); }
   });
   card.querySelector('#saveBtn').addEventListener('click', async (ev) => {
+    if(!validateFoodDecimals(card)) return;
     const btn = ev.currentTarget;
     btn.disabled = true; btn.textContent = 'Guardando...';
     const common = { userId: user.id, ...readWhen() };
@@ -1494,11 +1518,11 @@ function openQuickAddForm(){
     <h3><span>⚡</span> Agregar rápido</h3>
     <p class="form-hint">Para algo que comes una sola vez: se registra en tu día, pero no se guarda como alimento.</p>
     <div class="field"><label>Descripción (opcional)</label><input type="text" id="qa_name" placeholder="Ej: Cachapa en la carretera"></div>
-    <div class="field"><label>Calorías (kcal)</label><input type="number" id="qa_kcal" inputmode="decimal" min="0" step="any"></div>
+    <div class="field"><label>Calorías (kcal)</label><input type="text" id="qa_kcal" inputmode="decimal"></div>
     <div class="row-3">
-      <div class="field"><label>Proteína (g)</label><input type="number" id="qa_protein" inputmode="decimal" min="0" step="any" placeholder="opcional"></div>
-      <div class="field"><label>Carbos (g)</label><input type="number" id="qa_carbs" inputmode="decimal" min="0" step="any" placeholder="opcional"></div>
-      <div class="field"><label>Grasa (g)</label><input type="number" id="qa_fat" inputmode="decimal" min="0" step="any" placeholder="opcional"></div>
+      <div class="field"><label>Proteína (g)</label><input type="text" id="qa_protein" inputmode="decimal" placeholder="opcional"></div>
+      <div class="field"><label>Carbos (g)</label><input type="text" id="qa_carbs" inputmode="decimal" placeholder="opcional"></div>
+      <div class="field"><label>Grasa (g)</label><input type="text" id="qa_fat" inputmode="decimal" placeholder="opcional"></div>
     </div>
     ${whenHtml(momento)}
     <div class="form-actions sticky">
@@ -1509,7 +1533,7 @@ function openQuickAddForm(){
   formArea.appendChild(card);
   card.querySelector('#cancelBtn').addEventListener('click', openFoodForm);
   const readWhen = wireWhen(card, momento);
-  const num = id => { const v = card.querySelector(id).value; return v === '' ? null : Number(v); };
+  const num = id => { const v = card.querySelector(id).value.trim(); return v === '' ? null : foodDecimal(v); };
   // sin kcal pero con macros: 4 kcal por g de proteína y carbos, 9 por g de grasa
   const macroKcal = () => {
     const p = num('#qa_protein'), c = num('#qa_carbs'), g = num('#qa_fat');
@@ -1521,6 +1545,7 @@ function openQuickAddForm(){
     card.querySelector('#qa_kcal').placeholder = k != null ? `≈ ${k} (por los macros)` : '';
   }));
   card.querySelector('#saveBtn').addEventListener('click', async () => {
+    if(!validateFoodDecimals(card)) return;
     const kcal = num('#qa_kcal') ?? macroKcal();
     if(kcal == null || kcal < 0){ showToast('Escribe las calorías (o los macros)'); return; }
     const foodRow = { id: null, name: card.querySelector('#qa_name').value.trim() || 'Agregado rápido' };
@@ -1551,12 +1576,12 @@ function openNewFoodForm(){
   const nutrientInputs = NUTRIENT_FIELDS.map(f => `
     <div class="field">
       <label>${f.label} (${f.unit})</label>
-      <input type="number" step="0.1" inputmode="decimal" data-nutri="${f.key}" placeholder="opcional">
+      <input type="text" inputmode="decimal" data-nutri="${f.key}" placeholder="opcional">
     </div>`).join('');
   const microInputs = MICRO_FIELDS.map(f => `
     <div class="field">
       <label>${f.label} (${f.unit})</label>
-      <input type="number" step="0.1" inputmode="decimal" data-micro="${f.key}" placeholder="opcional">
+      <input type="text" inputmode="decimal" data-micro="${f.key}" placeholder="opcional">
     </div>`).join('');
 
   card.innerHTML = `
@@ -1566,7 +1591,7 @@ function openNewFoodForm(){
       <div class="field"><label>Marca</label><input type="text" id="nf_brand" placeholder="opcional, ej: Savoy"></div>
       <div class="field"><label>Porción de referencia</label><input type="text" id="nf_serving" placeholder="Ej: 100 g, 1 unidad" value="100 g"></div>
     </div>
-    <div class="field"><label>Peso de esa porción (g)</label><input type="number" id="nf_serving_g" inputmode="decimal" min="0" step="any" placeholder="opcional, ej: 98"></div>
+    <div class="field"><label>Peso de esa porción (g)</label><input type="text" id="nf_serving_g" inputmode="decimal" placeholder="opcional, ej: 98"></div>
     <p style="font-size:12px; color:var(--text-dim); margin: 2px 0 10px;">Los valores de abajo son por esa porción de referencia. Deja en blanco lo que no sepas — lo puedes completar después.</p>
     ${nutrientInputs}
     <details class="more-fields">
@@ -1589,11 +1614,12 @@ function openNewFoodForm(){
 
   card.querySelector('#cancelBtn').addEventListener('click', openFoodForm);
   card.querySelector('#saveBtn').addEventListener('click', async () => {
+    if(!validateFoodDecimals(card)) return;
     const name = card.querySelector('#nf_name').value.trim();
     if(!name){ showToast('Falta el nombre'); return; }
     // si la porción se llama "100 g" (o "30 g"), su peso ya se sabe
     const labelG = (card.querySelector('#nf_serving').value.trim().match(/^(\d+(?:[.,]\d+)?)\s*g$/i) || [])[1];
-    const servingG = Number(card.querySelector('#nf_serving_g').value) || (labelG ? Number(labelG.replace(',', '.')) : 0);
+    const servingG = foodDecimal(card.querySelector('#nf_serving_g').value) || (labelG ? Number(labelG.replace(',', '.')) : 0);
     const units = readUnits(card);
     if(units.length && !(servingG > 0)){ showToast('Las porciones caseras necesitan el peso de la porción'); return; }
     const fields = {
@@ -1605,12 +1631,12 @@ function openNewFoodForm(){
       micros: {}
     };
     NUTRIENT_FIELDS.forEach(f => {
-      const v = card.querySelector(`[data-nutri="${f.key}"]`).value;
-      fields[f.key] = v === '' ? null : Number(v);
+      const v = card.querySelector(`[data-nutri="${f.key}"]`).value.trim();
+      fields[f.key] = v === '' ? null : foodDecimal(v);
     });
     MICRO_FIELDS.forEach(f => {
-      const v = card.querySelector(`[data-micro="${f.key}"]`).value;
-      if(v !== '') fields.micros[f.key] = Number(v);
+      const v = card.querySelector(`[data-micro="${f.key}"]`).value.trim();
+      if(v !== '') fields.micros[f.key] = foodDecimal(v);
     });
     const saveBtn = card.querySelector('#saveBtn');
     saveBtn.disabled = true; saveBtn.textContent = 'Guardando...';
@@ -2197,9 +2223,9 @@ function openWaterForm(){
       <div class="field"><label>Qué bebiste (opcional)</label><input type="text" id="w_label" placeholder="Ej: Suero oral"></div>
       <p class="form-hint" style="margin-top:0">Si trae electrolitos, copia lo que dice la etiqueta para esa cantidad.</p>
       <div class="row-3">
-        <div class="field"><label>Sodio (mg)</label><input type="number" id="w_na" inputmode="decimal" min="0" step="any" placeholder="opcional"></div>
-        <div class="field"><label>Potasio (mg)</label><input type="number" id="w_k" inputmode="decimal" min="0" step="any" placeholder="opcional"></div>
-        <div class="field"><label>Magnesio (mg)</label><input type="number" id="w_mg" inputmode="decimal" min="0" step="any" placeholder="opcional"></div>
+        <div class="field"><label>Sodio (mg)</label><input type="text" id="w_na" inputmode="decimal" placeholder="opcional"></div>
+        <div class="field"><label>Potasio (mg)</label><input type="text" id="w_k" inputmode="decimal" placeholder="opcional"></div>
+        <div class="field"><label>Magnesio (mg)</label><input type="text" id="w_mg" inputmode="decimal" placeholder="opcional"></div>
       </div>
       <button class="btn-primary" id="saveBtn" type="button" style="width:100%">Agregar</button>
     </details>
@@ -2232,7 +2258,8 @@ function openWaterForm(){
     }catch(err){ showToast('Error: ' + err.message); }
   }));
   card.querySelector('#saveBtn').addEventListener('click', async (ev) => {
-    const num = id => { const v = card.querySelector(id).value; return v === '' ? null : Number(v); };
+    if(!validateFoodDecimals(card)) return;
+    const num = id => { const v = card.querySelector(id).value.trim(); return v === '' ? null : foodDecimal(v); };
     const amount = num('#w_ml');
     if(!(amount > 0)){ showToast('Escribe los mililitros'); return; }
     ev.currentTarget.disabled = true;
@@ -2392,6 +2419,7 @@ async function renderSleep(){
   catch(err){ wrap.innerHTML = `<div class="empty-state">Error: ${escapeHtml(err.message)}</div>`; return; }
   const byDate = new Map(list.map(e => [e.date, e]));
   const last = byDate.get(todayStr());
+  const reference = sleepReference(bodyProfile?.birth_year);
 
   // anoche
   let top;
@@ -2409,6 +2437,7 @@ async function renderSleep(){
   const week = [];
   for(let i = 0; i < 7; i++){ const e = byDate.get(daysAgoStr(i)); if(e) week.push(e); }
   const durs = week.map(e => calcSleep(e.data).dur).filter(x => x != null);
+  const score = sleepScore(week, reference.min);
   const quals = week.map(e => Number(e.data.calidad)).filter(Boolean);
   const beds = week.map(e => e.data.horaDormir).filter(Boolean).map(minsFromNoon);
   const wakes = week.map(e => e.data.horaDespertar).filter(Boolean).map(minsFromNoon);
@@ -2422,7 +2451,7 @@ async function renderSleep(){
       ${stat('te duermes', beds.length ? clockFromNoon(avg(beds)) : '—', beds.length >= 2 ? `± ${Math.round(spread(beds))} min` : '')}
       ${stat('te despiertas', wakes.length ? clockFromNoon(avg(wakes)) : '—', wakes.length >= 2 ? `± ${Math.round(spread(wakes))} min` : '')}
     </div>
-    <p class="sl-foot">Últimos 7 días · ${week.length} noche${week.length === 1 ? '' : 's'} registrada${week.length === 1 ? '' : 's'}. El "±" es cuánto varía tu horario de una noche a otra: mientras más chico, más regular.</p>`;
+    <p class="sl-foot">Últimos 7 días · ${week.length} noche${week.length === 1 ? '' : 's'} registrada${week.length === 1 ? '' : 's'}. El "±" es la desviación media respecto a tu horario promedio: mientras más chico, más regular.</p>`;
   }
 
   // barras de las últimas 14 noches (8 h = línea de referencia)
@@ -2430,9 +2459,9 @@ async function renderSleep(){
   for(let i = 13; i >= 0; i--){
     const d = daysAgoStr(i), e = byDate.get(d);
     const dur = e ? calcSleep(e.data).dur : null;
-    const h = dur != null ? Math.min(100, (dur / 600) * 100) : 0;
+    const h = dur != null ? Math.min(100, (dur / 720) * 100) : 0;
     const day = new Date(d + 'T12:00:00').toLocaleDateString('es-VE', { weekday: 'narrow' });
-    bars.push(`<div class="sl-bar" title="${dur != null ? fmtDur(dur) : 'sin registro'}"><div class="sl-fill${dur != null && dur < 420 ? ' is-short' : ''}" style="height:${h}%"></div><span>${day}</span></div>`);
+    bars.push(`<button type="button" class="sl-bar" data-sleep-day="${d}" aria-label="${nightLabel(d)}: ${dur != null ? fmtDur(dur) : 'sin registro'}"><div class="sl-fill${dur != null && dur < reference.min ? ' is-short' : ''}" style="height:${h}%"></div><span>${day}</span></button>`);
   }
 
   const nights = list.sort((a, b) => b.date.localeCompare(a.date));
@@ -2441,9 +2470,31 @@ async function renderSleep(){
     <div class="data-card sl-top">${top}</div>
     ${stats ? `<h2 class="section-title">Tu semana</h2><div class="data-card">${stats}</div>` : ''}
     <h2 class="section-title">Últimas 2 semanas</h2>
-    <div class="data-card"><div class="sl-bars">${bars.join('')}</div><div class="sl-legend">La línea marca 8 h · en rojo, menos de 7 h</div></div>
+    <div class="data-card"><div class="sl-bars" style="--sleep-line:${reference.target / 720}">${bars.join('')}</div><div class="sl-legend">Línea: ${fmtDur(reference.target)} · rojo: menos de ${fmtDur(reference.min)} · toca una noche para ver el detalle.</div><p class="sl-foot">${reference.label}. Sin registro no significa que no dormiste.</p><p id="sleepBarDetail" role="status"></p></div>
+    <div class="data-card sleep-score">
+      <h4>Tu constancia esta semana</h4>
+      ${score ? `<div class="sl-big mono">${score.total}<small>/100</small></div><p>${score.nights} noches con duración y calidad completas.</p>` : '<p>Registra al menos 3 noches con horas y calidad en los últimos 7 días para ver el puntaje.</p>'}
+      <details class="more-fields"><summary>Cómo se calcula</summary><p>Indicador propio de Asclepio, orientativo y no clínico. No mide sueño profundo ni sustituye cómo te sientes.</p><ul>
+        <li>Duración: hasta 50 puntos por alcanzar ${fmtDur(reference.min)}; dormir más no suma extra.${score ? ` Ahora: ${score.duration}/50.` : ''}</li>
+        <li>Regularidad: hasta 30 puntos. Se descuentan según la variación de tus horas de dormir y despertar, hasta 2 h.${score ? ` Ahora: ${score.regularity}/30.` : ''}</li>
+        <li>Calidad que tú indicas: hasta 20 puntos.${score ? ` Ahora: ${score.quality}/20.` : ''}</li>
+      </ul><p>Solo cuenta noches completas; los días sin registrar no se califican. No suma puntos al ranking.</p></details>
+    </div>
+    <details class="data-card sleep-guide"><summary>Preparar una mejor noche</summary>
+      <p>Prueba un cambio a la vez y observa cómo descansas.</p>
+      <ul><li><b>Al despertar:</b> busca luz natural al aire libre durante la primera hora, sin mirar directamente al sol.</li>
+      <li><b>Durante el día:</b> mantén horarios parecidos y evita la cafeína por la tarde o noche. Huberman propone dejar 8–10 h antes de dormir; la sensibilidad varía.</li>
+      <li><b>Antes de acostarte:</b> baja la luz y apaga pantallas al menos 30 min antes. Mantén el cuarto fresco, oscuro y tranquilo.</li></ul>
+      <p>Si te cuesta dormir con frecuencia o sigues muy somnoliento, consulta con un profesional.</p>
+      <p class="sleep-sources">Fuentes: <a href="https://www.cdc.gov/sleep/about/" target="_blank" rel="noopener noreferrer">CDC</a> · <a href="https://www.hubermanlab.com/newsletter/toolkit-for-sleep" target="_blank" rel="noopener noreferrer">Huberman Lab</a></p>
+    </details>
     <h2 class="section-title">Noches registradas</h2>
     ${nights.length ? `<div class="timeline">${nights.map(entryRow).join('')}</div>` : '<div class="empty-state">Aún no hay noches registradas.</div>'}`;
+  wrap.querySelectorAll('[data-sleep-day]').forEach(b => b.addEventListener('click', () => {
+    const e = byDate.get(b.dataset.sleepDay);
+    const dur = e ? calcSleep(e.data).dur : null;
+    document.getElementById('sleepBarDetail').textContent = `${nightLabel(b.dataset.sleepDay)} · ${dur != null ? fmtDur(dur) : 'sin duración registrada'}`;
+  }));
   wrap.querySelectorAll('[data-sleep-edit]').forEach(b => b.addEventListener('click', async () => {
     if(!isViewingToday()) await setViewDate(todayStr());   // "anoche" es siempre la noche que terminó hoy
     openActivityForm('sueno', byDate.get(todayStr()) || null);
@@ -2870,19 +2921,21 @@ const GOAL_INPUTS = { goal_kcal: 'goalKcal', goal_protein_g: 'goalProtein', goal
 
 /** Pone la meta en los campos. dirty = viene de la calculadora y falta guardarla. */
 function fillGoalInputs(g = goalsFor(todayStr()), dirty = false){
-  Object.entries(GOAL_INPUTS).forEach(([k, id]) => { document.getElementById(id).value = Math.round(g[k]); });
+  Object.entries(GOAL_INPUTS).forEach(([k, id]) => { document.getElementById(id).value = String(Number(g[k])).replace('.', ','); });
   setGoalsDirty(dirty);
 }
 function readGoalInputs(){
   const out = {};
-  Object.entries(GOAL_INPUTS).forEach(([k, id]) => { out[k] = Number(document.getElementById(id).value); });
+  Object.entries(GOAL_INPUTS).forEach(([k, id]) => { out[k] = foodDecimal(document.getElementById(id).value); });
   return out;
 }
 /** El botón avisa si hay cambios sin guardar (como un LED de "pendiente"). */
 function setGoalsDirty(dirty){
   const btn = document.getElementById('saveGoalsBtn');
   btn.classList.toggle('is-dirty', dirty);
-  btn.textContent = dirty ? 'Guardar meta (sin guardar)' : 'Guardar meta';
+  btn.textContent = dirty ? 'Guardar cambios desde hoy' : 'Meta guardada';
+  btn.disabled = !dirty;
+  document.getElementById('goalStatus').textContent = dirty ? 'Cambios sin guardar' : 'Esta es tu meta actual';
   paintGoalCheck();
 }
 /** Cuántas kcal suman los macros (4/4/9), para ver si cuadran con las calorías. */
@@ -2890,7 +2943,7 @@ function paintGoalCheck(){
   const g = readGoalInputs();
   const fromMacros = Math.round(g.goal_protein_g * 4 + g.goal_carbs_g * 4 + g.goal_fat_g * 9);
   const el = document.getElementById('goalCheck');
-  if(!fromMacros || !g.goal_kcal){ el.textContent = ''; return; }
+  if(!Number.isFinite(fromMacros) || !fromMacros || !g.goal_kcal){ el.textContent = ''; return; }
   const diff = fromMacros - g.goal_kcal;
   el.innerHTML = Math.abs(diff) <= 60
     ? `Proteína, carbos y grasa suman <b class="mono">${fromMacros}</b> kcal: cuadra.`
@@ -2900,30 +2953,33 @@ Object.values(GOAL_INPUTS).forEach(id => document.getElementById(id).addEventLis
 
 /** Guarda las metas en el perfil y en el historial (valen desde hoy). */
 async function saveGoals(goals){
-  await updateGoals(user.id, goals);
-  profile = { ...profile, ...goals };
+  // Conserva la meta previa para fechas anteriores al primer cambio registrado.
+  if(!goalHistory.length) await saveGoalsFrom(user.id, '1970-01-01', goalsFor(todayStr()));
+  await saveGoalsFrom(user.id, todayStr(), goals);
+  goalHistory = await getGoalHistory(user.id);
   try{
-    await saveGoalsFrom(user.id, todayStr(), goals);
-    goalHistory = await getGoalHistory(user.id);
+    await updateGoals(user.id, goals);
+    profile = { ...profile, ...goals };
   }catch(err){
-    // sin la tabla de la fase 2 las metas igual quedan en el perfil
-    console.warn('historial de metas:', err.message || err);
+    await renderToday();
+    throw new Error('La meta quedó en el historial, pero falta sincronizar el perfil. Toca Guardar de nuevo. ' + err.message);
   }
   await renderToday();
 }
 
-document.getElementById('saveGoalsBtn').addEventListener('click', async () => {
+document.getElementById('saveGoalsBtn').addEventListener('click', async (ev) => {
   const goals = readGoalInputs();
   if(Object.values(goals).some(v => !Number.isFinite(v) || v <= 0)){
     showToast('Todas las metas deben ser mayores a 0');
     return;
   }
+  const btn = ev.currentTarget; btn.disabled = true;
   try{
     await saveGoals(goals);
     setGoalsDirty(false);
     renderSuggestion();
     showToast('Meta guardada desde hoy');
-  }catch(err){ showToast('Error: ' + err.message); }
+  }catch(err){ showToast('Error: ' + err.message); btn.disabled = false; }
 });
 
 /* ================= objetivo: datos → qué quieres → meta ================= */
@@ -2948,7 +3004,7 @@ function fillBodyInputs(){
 }
 
 function readWeightInput(){
-  const kg = Number(String(document.getElementById('bodyWeight').value).replace(',', '.'));
+  const kg = foodDecimal(document.getElementById('bodyWeight').value);
   return kg > 20 && kg < 400 ? kg : null;
 }
 
@@ -2957,7 +3013,7 @@ function readBodyInputs(){
   return {
     sex: objState.sex,
     birth_year: age > 0 ? new Date().getFullYear() - age : null,
-    height_cm: Number(document.getElementById('bodyHeight').value) || null,
+    height_cm: foodDecimal(document.getElementById('bodyHeight').value) || null,
     objective: objectiveOf(objState.pace),
     pace_kg_week: objState.pace,
     training_days: objState.training
@@ -2989,6 +3045,25 @@ document.getElementById('trainChips').addEventListener('click', e => {
 });
 ['bodyAge','bodyHeight','bodyWeight'].forEach(id => document.getElementById(id).addEventListener('input', renderSuggestion));
 
+let objectiveStep = 0;
+function paintObjectiveStep(){
+  document.querySelectorAll('[data-objective-step]').forEach(el => { el.hidden = Number(el.dataset.objectiveStep) !== objectiveStep; });
+  document.getElementById('objectiveProgress').textContent = `Paso ${objectiveStep + 1} de 3 · ${['Tus datos', 'Tu objetivo', 'Revisa la propuesta'][objectiveStep]}`;
+  document.getElementById('objectiveBack').hidden = objectiveStep === 0;
+  document.getElementById('objectiveNext').hidden = objectiveStep === 2;
+}
+document.getElementById('objectiveNext').addEventListener('click', () => {
+  renderSuggestion();
+  if(objectiveStep === 0 && !lastSuggestion){
+    showToast('Completa sexo, edad (18–100), altura (100–250 cm) y peso (20–400 kg)'); return;
+  }
+  objectiveStep = Math.min(2, objectiveStep + 1); paintObjectiveStep();
+});
+document.getElementById('objectiveBack').addEventListener('click', () => { objectiveStep = Math.max(0, objectiveStep - 1); paintObjectiveStep(); });
+document.getElementById('calcGoals').addEventListener('toggle', () => {
+  if(document.getElementById('calcGoals').open){ objectiveStep = 0; paintObjectiveStep(); }
+});
+
 let lastSuggestion = null;
 function renderSuggestion(){
   const box = document.getElementById('goalResult');
@@ -3000,7 +3075,7 @@ function renderSuggestion(){
   if(!s){
     const missing = [!objState.sex && 'sexo', !document.getElementById('bodyAge').value && 'edad',
       !document.getElementById('bodyHeight').value && 'altura', !kg && 'peso'].filter(Boolean);
-    box.innerHTML = `<div class="gr-empty">Completa ${missing.join(', ')} en el paso 1 para calcular tu meta.</div>`;
+    box.innerHTML = `<div class="gr-empty">${missing.length ? 'Completa ' + missing.join(', ') : 'Revisa edad (18–100), altura (100–250 cm) y peso (20–400 kg)'} en el paso 1 para calcular tu meta.</div>`;
     return;
   }
   const g = s.goals;
@@ -3012,18 +3087,20 @@ function renderSuggestion(){
   box.innerHTML = `
     <div class="gr-kcal"><b class="mono">${g.goal_kcal}</b> kcal al día</div>
     <div class="gr-why">${paceTxt} · gastas ≈ ${s.tdee} kcal${delta ? ` (${delta > 0 ? '+' : '−'}${Math.abs(delta)})` : ''}</div>
-    ${s.clamped ? `<div class="gr-warn">Ese ritmo bajaría de tu mínimo seguro; se dejó en ${g.goal_kcal} kcal.</div>` : ''}
+    ${s.clamped ? `<div class="gr-warn">Ese ritmo bajaría del mínimo usado por la calculadora; se dejó en ${g.goal_kcal} kcal.</div>` : ''}
     <div class="gr-macros">
       <span><b class="mono">${g.goal_protein_g}</b> g proteína</span>
       <span><b class="mono">${g.goal_carbs_g}</b> g carbos</span>
       <span><b class="mono">${g.goal_fat_g}</b> g grasa</span>
       <span><b class="mono">${fmtLiters(g.goal_water_ml)}</b> L agua</span>
     </div>
-    ${Math.round(now.goal_kcal) !== g.goal_kcal ? `<div class="gr-now">Ahora tienes ${Math.round(now.goal_kcal)} kcal.</div>` : '<div class="gr-now">Ya son tus metas actuales.</div>'}`;
+    ${Object.keys(GOAL_INPUTS).some(k => Math.round(now[k]) !== g[k]) ? `<div class="gr-now">Ahora tienes ${Math.round(now.goal_kcal)} kcal.</div>` : '<div class="gr-now">Ya son tus metas actuales.</div>'}`;
 }
 
 document.getElementById('saveObjectiveBtn').addEventListener('click', async (ev) => {
+  renderSuggestion();
   if(!lastSuggestion) return;
+  const proposal = { ...lastSuggestion.goals };
   const fields = readBodyInputs();
   if(fields.height_cm < 100 || fields.height_cm > 250){ showToast('La altura va en cm (100–250)'); return; }
   const btn = ev.currentTarget;
@@ -3039,12 +3116,12 @@ document.getElementById('saveObjectiveBtn').addEventListener('click', async (ev)
     try{ bodyProfile = await saveBodyProfile(user.id, fields); }
     catch(err){ if(err.saved){ bodyProfile = err.saved; showError(err.message); } else throw err; }
     // la meta calculada va a los campos de arriba: la ajustas y la guardas tú
-    fillGoalInputs(lastSuggestion.goals, true);
+    fillGoalInputs(proposal, true);
     document.getElementById('calcGoals').open = false;
     document.querySelector('#panel-datos .goal-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    showToast('Ajústala si quieres y toca Guardar meta');
+    showToast('Revisa los valores y toca Guardar cambios desde hoy');
   }catch(err){ showToast('Error: ' + err.message); }
-  finally{ btn.disabled = !lastSuggestion; btn.textContent = 'Pasar a mi meta para ajustarla'; }
+  finally{ btn.disabled = !lastSuggestion; btn.textContent = 'Usar esta propuesta'; }
 });
 
 /* ================= peso corporal ================= */
@@ -3070,18 +3147,28 @@ function renderWeights(){
     <div class="combo-item"><span><span class="mono entry-time">${new Date(w.log_date + 'T12:00:00').toLocaleDateString('es-VE', { weekday:'short', day:'numeric', month:'short' })}</span> ${String(Number(w.weight_kg)).replace('.', ',')} kg</span>
       <button class="entry-del" data-del-weight="${w.id}" type="button">eliminar</button></div>`).join('')}</div>`;
   wrap.querySelectorAll('[data-del-weight]').forEach(b => b.addEventListener('click', async () => {
+    const removed = weights.find(w => w.id === b.dataset.delWeight);
+    b.disabled = true;
     try{
       await deleteWeight(b.dataset.delWeight);
       weights = weights.filter(w => w.id !== b.dataset.delWeight);
-      renderWeights();
-      renderSuggestion();
-    }catch(err){ showToast('Error: ' + err.message); }
+      fillBodyInputs(); renderWeights();
+      showToast('Peso eliminado', { label: 'Deshacer', fn: async () => {
+        try{
+          if(weights.some(w => w.log_date === removed.log_date)){ showToast('Ya hay un peso nuevo para ese día'); return; }
+          const row = await saveWeight(user.id, removed.log_date, removed.weight_kg);
+          weights = [row, ...weights].sort((a,b) => b.log_date.localeCompare(a.log_date));
+          fillBodyInputs(); renderWeights();
+        }catch(err){ showToast('Error: ' + err.message); }
+      }});
+    }catch(err){ showToast('Error: ' + err.message); b.disabled = false; }
   }));
 }
 
-document.getElementById('saveWeightBtn').addEventListener('click', async () => {
-  const kg = Number(String(document.getElementById('weightInput').value).replace(',', '.'));
+document.getElementById('saveWeightBtn').addEventListener('click', async (ev) => {
+  const kg = foodDecimal(document.getElementById('weightInput').value);
   if(!(kg > 20 && kg < 400)){ showToast('Escribe tu peso en kg'); return; }
+  const btn = ev.currentTarget; btn.disabled = true;
   try{
     const row = await saveWeight(user.id, todayStr(), kg);
     weights = [row, ...weights.filter(w => w.log_date !== row.log_date)];
@@ -3092,6 +3179,7 @@ document.getElementById('saveWeightBtn').addEventListener('click', async () => {
     renderSuggestion();
     showToast('Peso guardado');
   }catch(err){ showToast('Error: ' + err.message); }
+  finally{ btn.disabled = false; }
 });
 
 document.getElementById('weightInput').addEventListener('keydown', e => {
