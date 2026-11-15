@@ -1,3 +1,38 @@
+# Preferencias explícitas y salud digestiva · versión 30
+
+Implementación programada para el 15 de noviembre de 2026, 07:00 de Caracas. Conserva HTML/CSS/módulos ES, cinco pestañas y Supabase existente. Sin dependencias nuevas, API generativa, secretos, migraciones ni cambios en puntos o rachas.
+
+## Preferencias y variantes
+
+- Agregar y repetir aportan evidencia positiva mediante los registros reales de comida. Mostrar, ignorar o abrir/cancelar una sugerencia no genera una señal negativa ni modifica preferencias.
+- La × se presenta como **«No me gusta»**. Guarda motivo explícito, alimento, fecha e identidad FDC/ID en las preferencias locales de la cuenta. Excluye ese alimento de recomendaciones, referencias habituales y entrenamiento de preferencias; no excluye su categoría. Los ocultamientos anteriores siguen respetándose. Se puede restaurar uno o todos.
+- Las variantes toman como referencia alimentos registrados en la misma comida y de función culinaria compatible; comparan reparto energético de macros y ajustan cantidades a energía semejante dentro de porciones acotadas. Se muestra «Variante de…». Siguen aplicándose presupuesto calórico y límites nutricionales documentados. Son propuestas revisables, no equivalencias clínicas o planes prescritos.
+- La tolerancia es una preferencia explícita por porciones pequeñas de un alimento concreto, restaurable. No se deduce automáticamente una intolerancia de los síntomas. Los fallos de lectura/escritura local se informan y no reemplazan preferencias ilegibles.
+
+## Salud digestiva
+
+- Se abre desde el mosaico Baño o desde su formulario. No añade una pestaña. Bristol exacto 1–7, dolor, hinchazón, esfuerzo y urgencia 0–10; vacío significa desconocido y cero ausencia declarada. Los registros anteriores mantienen su categoría agrupada sin inventar un valor exacto. «No fui hoy» conserva síntomas y borra el Bristol; los días sin registros no se interpretan como cero deposiciones. Se avisa de contradicciones entre «no fui» y deposiciones del mismo día.
+- Bristol y síntomas del evento se guardan en `activity_logs.data`, usando las políticas RLS existentes y el tipo `bano`. No se añaden tipos de actividad, triggers o puntos. El reporte general conserva el detalle nuevo.
+- Contexto diario, medicación declarada, probióticos y preferencias de tolerancia se conservan **solo en localStorage, separados por cuenta y dispositivo**. No se sincronizan con Supabase. Esto está explicado en pantalla; se ofrece exportación para consulta con deposiciones, alimentación disponible, sueño, síntomas, medicación y fichas/tomas declaradas. No se registra una actividad extra para estos datos ni se publica el historial personal.
+- Catálogo digestivo versionado basado en identidades FDC de los básicos, con enlaces de procedencia y componentes cualitativos documentados. Distingue fermentación de cultivos vivos (desconocidos sin verificar etiqueta) y de probióticos con evidencia específica. No inventa gramos de prebióticos. Agrupa preparaciones de vegetales y muestra cobertura del catálogo y de fibra; «30 plantas» no es un umbral clínico. Los registros fuera del catálogo no se clasifican por conjeturas sobre su nombre.
+- Fichas de probióticos editables: especie, cepa, UFC/dosis, dosis declarada, conservación, vencimiento, motivo, inicio/final y enlace de evidencia de PubMed/PMC/AGA/WGO. Tomas explícitas por día. Desconocido no se sustituye por una dosis; no se prescriben productos ni se aprueba automáticamente un producto por enlazar un estudio. Se advierte sobre vencimiento y consulta profesional en poblaciones vulnerables.
+- Contexto diario con señales de alarma declaradas (sangre, dolor persistente, pérdida involuntaria de peso) y orientación de valoración médica; urgencia ante dolor intenso o sangrado abundante. No se diagnostican enfermedades, composición bacteriana, disbiosis o intolerancias.
+
+## Análisis y límites
+
+- Asociaciones entre dolor diario y fibra, sueño, estrés o medicación del día anterior, con tamaños de muestra. Fibra solo en días confirmados como completos con firma de registros todavía válida; desconocimiento de medicación no equivale a no tomarla. No hay ajuste causal completo: las comparaciones no establecen causas ni justifican eliminar grupos alimentarios.
+- Modelo local k-NN de dolor diario con dolor, hinchazón y estrés previos. No usa la etiqueta del día objetivo. Al menos 32 pares utilizables permiten una evaluación inicial, no una garantía: predicciones secuenciales sobre 12 días posteriores, comparación contra promedio y persistencia, mejora mínima del 10 %, error máximo de dos puntos y mejora en ambas mitades de la evaluación. Se abstiene ante contexto alejado o señales de alarma. No pretende medir flora intestinal ni sustituir atención clínica.
+- La información educativa refleja diferencias entre guías sobre probióticos, los límites del pequeño ensayo de fermentados de Stanford, el carácter observacional de American Gut y las limitaciones de las pruebas de microbioma. Una dieta baja en FODMAP se describe como intervención profesional temporal con reintroducción, no una restricción automática.
+- Fuentes verificadas: [WGO](https://www.worldgastroenterology.org/UserFiles/file/guidelines/probiotics-and-prebiotics-english-2023.pdf), [AGA: probióticos](https://gastro.org/clinical-guidance/role-of-probiotics-in-the-management-of-gastrointestinal-disorders/), [AGA: distensión](https://gastro.org/news/new-clinical-practice-update-belching-bloating-distention/), [AGA: dieta](https://pubmed.ncbi.nlm.nih.gov/35337654/), [ISAPP: fermentados](https://pmc.ncbi.nlm.nih.gov/articles/PMC7925329/), [ISAPP: prebióticos](https://enviromicro-journals.onlinelibrary.wiley.com/doi/10.1111/jam.14424), [ensayo Stanford](https://pubmed.ncbi.nlm.nih.gov/34256014/), [American Gut](https://pubmed.ncbi.nlm.nih.gov/29795809/), [consenso de pruebas del microbioma](https://pmc.ncbi.nlm.nih.gov/articles/PMC12343204/), [NIDDK: señales de alarma](https://www.niddk.nih.gov/health-information/digestive-diseases/constipation/symptoms-causes).
+
+## Validación
+
+- `node --check` de todos los módulos. `tests/intelligence.mjs`, `tests/sleep-model.cjs` y `tests/gut.mjs`: modelos, datos faltantes, temporalidad, variantes, rechazos específicos, restauración, neutralidad, almacenamiento aislado por cuenta y catálogo.
+- `tests/mobile.cjs`: Chrome/Playwright 390×844, servidor Python local, Supabase en memoria. Prueba cinco pestañas, contexto cero/desconocido, avisos, registro y edición de probióticos/tomas, escape de texto, exportación, Bristol, «no fui» con conservación de síntomas y ausencia de escrituras extra de actividades por funciones locales. Consola sin errores e inspección de capturas. No se probó Safari físico ni se modificó producción.
+- Caché de todos los módulos y CSS en versión 30. **No hay SQL que ejecutar.**
+
+---
+
 # Modelos locales y micronutrientes · versión 29
 
 Implementado el 15 de noviembre de 2026. Frontend estático, sin npm, build, APIs generativas, dependencias nuevas ni cambios en Supabase. No hay SQL que ejecutar.

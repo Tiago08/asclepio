@@ -138,7 +138,13 @@ export function adaptiveEnergy({foods,weights,completed,prior,bmr,today}){
   return {state:active?'active':'baseline',days:count,weights:samples.length,mae,baseline,tdee:active?Math.round(fit.tdee/10)*10:null,validation:6};
 }
 
-const foodKey = f => f.usda_fdc_id ? 'fdc:'+f.usda_fdc_id : f.id ? 'id:'+f.id : null;
+export const foodKey = f => f.usda_fdc_id ? 'fdc:'+f.usda_fdc_id : f.id ? 'id:'+f.id : null;
+export function culinaryRole(food){
+  if(['Granos','Panes','Tubérculos'].includes(food.category))return 'acompañamiento';
+  if(['Proteínas','Huevos'].includes(food.category))return 'proteína';
+  if(food.category==='Lácteos')return /queso/i.test(food.name)?'queso':/yogur/i.test(food.name)?'yogur':'bebida láctea';
+  return food.category||null;
+}
 const mealName = m => m==='Snack'?'Merienda':m;
 function preferenceFit(logs,idMap){
   const global={},meals={};
@@ -156,9 +162,9 @@ function preferenceFit(logs,idMap){
 }
 
 /** Modelo categórico bayesiano de elección por comida, evaluado en días posteriores. */
-export function trainPreferences(logs,catalog){
+export function trainPreferences(logs,catalog,rejected=[]){
   const idMap=new Map(catalog.filter(f=>f.id).map(f=>[f.id,foodKey(f)]));
-  const rows=logs.filter(r=>idMap.has(r.food_id)).sort((a,b)=>(a.log_date+a.log_time).localeCompare(b.log_date+b.log_time));
+  const rows=logs.filter(r=>idMap.has(r.food_id) && !rejected.includes(idMap.get(r.food_id))).sort((a,b)=>(a.log_date+a.log_time).localeCompare(b.log_date+b.log_time));
   const dates=[...new Set(rows.map(r=>r.log_date))];
   if(rows.length<40 || dates.length<14) return {active:false,count:rows.length};
   const cutoff=dates[Math.floor(dates.length*.75)],train=rows.filter(r=>r.log_date<cutoff),test=rows.filter(r=>r.log_date>=cutoff);
@@ -169,10 +175,16 @@ export function trainPreferences(logs,catalog){
   return {active:error<baseline*.95,count:rows.length,error,baseline,validation:test.length,prob:final.prob};
 }
 
-export function recommendFoods({catalog,targets,totals,coverage,goals,kcal,protein,logs,meal,hidden=[],completeMacros=true}){
+export function recommendFoods({catalog,targets,totals,coverage,goals,kcal,protein,logs,meal,hidden=[],completeMacros=true,tolerance={}}){
   const remaining=Number(goals.goal_kcal)-kcal;
   if(!completeMacros || !Number.isFinite(remaining) || remaining<80) return {items:[],preference:{active:false,count:0}};
-  const preference=trainPreferences(logs,catalog),seen=new Set(),items=[];
+  const preference=trainPreferences(logs,catalog,hidden),seen=new Set(),items=[];
+  const byId=new Map(catalog.filter(f=>f.id).map(f=>[f.id,f])),habits=new Map();
+  for(const log of logs){
+    const food=byId.get(log.food_id),key=food&&foodKey(food);
+    if(!food || !key || hidden.includes(key) || mealName(log.momento)!==meal)continue;
+    const old=habits.get(key)||{food,count:0,quantity:0};old.count++;old.quantity+=Number(log.quantity)>0?Number(log.quantity):1;habits.set(key,old);
+  }
   for(const food of catalog){
     const key=foodKey(food);
     if(!key || seen.has(key) || hidden.includes(key)) continue;seen.add(key);
@@ -181,7 +193,16 @@ export function recommendFoods({catalog,targets,totals,coverage,goals,kcal,prote
     if(!(grams>0) || !FEATURES.every(k=>known(food[k])))continue;
     const portionLimit=/frutos secos|semillas/i.test(food.category)?40:/queso/i.test(food.name)?60:250;
     const unit=food._units?.filter(u=>u.grams>=15 && u.grams<=portionLimit).sort((a,b)=>a.grams-b.grams)[0];
-    const portion=unit?unit.grams:/frutos secos|semillas/i.test(food.category)?30:/queso/i.test(food.name)?30:100;
+    let portion=unit?unit.grams:/frutos secos|semillas/i.test(food.category)?30:/queso/i.test(food.name)?30:100;
+    const anchor=[...habits.values()].filter(h=>foodKey(h.food)!==key && culinaryRole(h.food)===culinaryRole(food) && Number(h.food.kcal)>0)
+      .sort((a,b)=>b.count-a.count)[0];
+    let variant=null;
+    if(anchor){
+      const distance=mean(['protein_g','carbs_g','fat_g'].map(k=>Math.abs(Number(food[k])/Math.max(1,food.kcal)-Number(anchor.food[k]||0)/anchor.food.kcal)*(k==='fat_g'?9:4)));
+      const suggested=anchor.food.kcal*anchor.quantity/anchor.count/Number(food.kcal)*grams;
+      if(distance<=.35 && suggested>=20 && suggested<=250){portion=Math.round(suggested/5)*5;variant=anchor;}
+    }
+    if(tolerance[key]==='small')portion=Math.max(10,Math.round(portion*.5));
     const factor=portion/grams,energy=Number(food.kcal)*factor;
     if(energy<20 || energy>remaining || energy>600)continue;
     const contributions=[];let score=0,blocked=false;
@@ -200,10 +221,11 @@ export function recommendFoods({catalog,targets,totals,coverage,goals,kcal,prote
     const proteinGain=Math.min(Math.max(0,goals.goal_protein_g-protein),Number(food.protein_g)*factor)/Math.max(1,goals.goal_protein_g);
     score+=proteinGain*1.5;
     if(proteinGain>=.05)contributions.push({label:'Proteína',gain:proteinGain});
+    if(variant)score+=.2*(1+Math.log1p(variant.count));
     if(score<=.02)continue;
     if(preference.active) score*=1+Math.min(.3,preference.prob(key,meal).conditional);
     contributions.sort((a,b)=>b.gain-a.gain);
-    items.push({food,key,portion,quantity:factor,kcal:Math.round(energy),score,reason:contributions.slice(0,2).map(c=>c.label).join(' y ')||'Tus metas',unit:unit?.label});
+    items.push({food,key,portion,quantity:factor,kcal:Math.round(energy),score,variant:variant?.food.name||null,reason:variant?`Variante de ${variant.food.name}`:contributions.slice(0,2).map(c=>c.label).join(' y ')||'Tus metas',unit:unit?.label});
   }
   items.sort((a,b)=>b.score-a.score || a.key.localeCompare(b.key));
   const chosen=[];const categories=new Set();

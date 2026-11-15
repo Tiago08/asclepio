@@ -1,4 +1,4 @@
-import { supabase } from './supabaseClient.js?v=29';
+import { supabase } from './supabaseClient.js?v=30';
 
 export async function logActivity({ userId, type, date, time, data }) {
   const { data: row, error } = await supabase
@@ -47,6 +47,17 @@ export async function getEntriesInRange(userId, fromDate, toDate) {
   if (e1) throw e1;
   if (e2) throw e2;
   return mergeEntries(activity || [], foods || []);
+}
+
+/** Lectura privada y paginada bajo demanda para el diario digestivo. */
+export async function getDigestiveActivity(userId,fromDate,toDate){
+  const rows=[];
+  for(let offset=0;;offset+=500){
+    const {data,error}=await supabase.from('activity_logs').select('*').eq('user_id',userId)
+      .gte('log_date',fromDate).lte('log_date',toDate).order('log_date',{ascending:true}).order('id').range(offset,offset+499);
+    if(error)throw error;rows.push(...(data||[]));if((data||[]).length<500)break;
+  }
+  return mergeEntries(rows,[]);
 }
 
 function hhmm(t) {

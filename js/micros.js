@@ -5,7 +5,7 @@
 //   max  = límite de referencia según el nutriente; no diagnostica toxicidad
 // Azúcares totales se muestran sin confundirlos con azúcares añadidos.
 // Como una ventana de tolerancia de un componente: mínimo, nominal y máximo.
-import { NUTRIENT_FIELDS, MICRO_FIELDS } from './foods.js?v=29';
+import { NUTRIENT_FIELDS, MICRO_FIELDS } from './foods.js?v=30';
 
 // [hombre, mujer] para cada valor; null = sin ese límite
 const REF = {

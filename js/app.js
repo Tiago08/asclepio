@@ -1,30 +1,33 @@
-import { nightScore, personalModel, journalPatterns, sleepPreferences, storeSleepPreferences, wireSleepJournal, validateSleepJournal } from './sleepPersonal.js?v=29';
-import { sleepMetrics, sleepReference, sleepScore } from './sleep.js?v=29';
-import { supabase } from './supabaseClient.js?v=29';
+import { nightScore, personalModel, journalPatterns, sleepPreferences, storeSleepPreferences, wireSleepJournal, validateSleepJournal } from './sleepPersonal.js?v=30';
+import { sleepMetrics, sleepReference, sleepScore } from './sleep.js?v=30';
+import { supabase } from './supabaseClient.js?v=30';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js?v=29';
+} from './auth.js?v=30';
 import {
   NUTRIENT_FIELDS, MICRO_FIELDS, searchUsda, searchLocalFoods, searchFavorites, updateFood,
   cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, moveFoodLog, restoreFoodLog, copyFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel, pluralEs
-} from './foods.js?v=29';
+} from './foods.js?v=30';
 import {
   logActivity, updateActivityLog, restoreActivityLog, deleteActivityLog, getEntriesInRange, getRanking, getRecentEntries, invalidateRecentEntries
-} from './activity.js?v=29';
-import { buildReportText, downloadText } from './report.js?v=29';
-import { BASICS, searchBasics } from './basics.js?v=29';
-import { normalizeText } from './foodDict.js?v=29';
+} from './activity.js?v=30';
+import { getDigestiveActivity } from './activity.js?v=30';
+import { buildReportText, downloadText } from './report.js?v=30';
+import { BASICS, searchBasics } from './basics.js?v=30';
+import { normalizeText } from './foodDict.js?v=30';
 import {
   getGoalHistory, saveGoalsFrom, goalsForDate, getBodyProfile, saveBodyProfile, suggestGoals, PACES, paceOf, objectiveOf,
   getWeights, saveWeight, deleteWeight, getSupplements, addSupplement, retireSupplement,
   getSupplementLogs, getSupplementLogsInRange, setSupplementTaken, getWaterLogs, addWater, deleteWater,
   electrolyteTotals, getCombos, createCombo, deleteCombo
-} from './health.js?v=29';
-import { HABIT_MOMENTS, getHabits, addHabit, updateHabit, archiveHabit, getHabitLogs, setHabitDone } from './habits.js?v=29';
-import { microTargets, microTotals, microStatus } from './micros.js?v=29';
-import { trainMicroModels, estimateMissing, adaptiveEnergy, foodSignature, recommendFoods } from './intelligence.js?v=29';
-import { getNutritionHistory } from './health.js?v=29';
+} from './health.js?v=30';
+import { HABIT_MOMENTS, getHabits, addHabit, updateHabit, archiveHabit, getHabitLogs, setHabitDone } from './habits.js?v=30';
+import { microTargets, microTotals, microStatus } from './micros.js?v=30';
+import { trainMicroModels, estimateMissing, adaptiveEnergy, foodSignature, recommendFoods } from './intelligence.js?v=30';
+import { getNutritionHistory } from './health.js?v=30';
+import { gutStorage, bowelText } from './gut.js?v=30';
+import { renderGut, wireBowelFields, validateBowelFields } from './gutUI.js?v=30';
 
 /* ================= actualización automática ================= */
 /* GitHub Pages deja guardar index.html hasta 10 min y la app instalada en el
@@ -201,23 +204,11 @@ const TYPES = {
   },
   bano: {
     label: 'Baño', icon: '🚽', color: 'var(--c-bano)',
-    fields: [
-      { key:'tipo', label:'Cómo fue (escala de Bristol)', type:'chips', multi:false,
-        options:['Duro (1–2)','Normal (3–4)','Suelto (5–6)','Líquido (7)'] },
-      { key:'extras', label:'Además', type:'chips', multi:true, options:['Hinchazón'] },
-      { key:'nota', label:'Nota (opcional)', type:'text', placeholder:'' }
-    ],
+    fields: [],
     base: { fue: true },
     // como "día de descanso" en Gym: un toque y queda registrado que hoy no fuiste
     restAction: { label:'Hoy no fui al baño', data:{ fue:false } },
-    summary: d => {
-      if(d.fue === false) return 'No fui hoy';
-      const parts = [];
-      if(d.tipo) parts.push(d.tipo);
-      if(Array.isArray(d.extras) && d.extras.length) parts.push(d.extras.join(', '));
-      if(d.nota) parts.push(d.nota);
-      return parts.length ? parts.join(' · ') : 'Registrado';
-    }
+    summary: bowelText
   },
   sueno: {
     label: 'Sueño', icon: '🌙', color: 'var(--c-sueno)',
@@ -689,6 +680,21 @@ let usedFoods = [];
 let usedFoodIds = new Set();
 let microModels=null, microTraining=false, microTrainingPromise=null;
 let energyFoods=null, energyOwner=null, energyLoading=false, energyResult=null;
+let digestiveEntries=[],digestiveFoods=[],digestiveOwner=null;
+
+async function openGut(){
+  showPanel('digestivo','hoy');
+  const owner=user.id,date=viewDate,wrap=document.getElementById('gutArea');
+  wrap.innerHTML='<p class="search-empty"><span class="spinner"></span> Cargando tu diario…</p>';
+  try{
+    const [entries,foods]=await Promise.all([getDigestiveActivity(owner,daysAgoStr(69),date),getNutritionHistory(owner,daysAgoStr(69),date)]);
+    if(user?.id!==owner || viewDate!==date || document.body.dataset.tab!=='digestivo')return;
+    digestiveEntries=entries;digestiveFoods=foods;digestiveOwner=owner;
+    renderGut({host:wrap,userId:owner,date,entries,foods,catalog:learningCatalog(),completed:readLearningSettings().completed,
+      onRegister:()=>openActivityForm('bano'),onEdit:entry=>openActivityForm('bano',entry),onBack:()=>showPanel('hoy'),
+      onDownload:text=>downloadText('asclepio-digestivo-'+date+'.txt',text),onChange:renderSmartFood});
+  }catch(err){if(user?.id===owner){wrap.innerHTML=`<p role="alert">No se pudo cargar: ${escapeHtml(err.message)}</p><button class="btn-ghost" id="retryGut" type="button">Reintentar</button><button class="btn-link" id="backGutError" type="button">Volver a Hoy</button>`;wrap.querySelector('#retryGut').onclick=openGut;wrap.querySelector('#backGutError').onclick=()=>showPanel('hoy');}}
+}
 
 function resetLearningState(){
   energyFoods=null;energyOwner=null;energyResult=null;
@@ -697,15 +703,19 @@ function resetLearningState(){
   document.getElementById('completeDaysArea').textContent='';
   document.getElementById('smartFoodArea').textContent='';
   document.getElementById('energyModelCard').open=false;
+  digestiveEntries=[];digestiveFoods=[];digestiveOwner=null;
+  document.getElementById('gutArea').textContent='';
 }
 
 function readLearningSettings(){
   try{
     const saved=JSON.parse(localStorage.getItem('asclepio_learning_'+user.id)||'{}');
-    return {impute:saved.impute===true,completed:saved.completed&&typeof saved.completed==='object'?saved.completed:{},hidden:Array.isArray(saved.hidden)?saved.hidden:[]};
-  }catch{return {impute:false,completed:{},hidden:[]};}
+    if(!saved || typeof saved!=='object' || Array.isArray(saved))throw new Error('Preferencias no válidas');
+    return {impute:saved.impute===true,completed:saved.completed&&typeof saved.completed==='object'?saved.completed:{},hidden:Array.isArray(saved.hidden)?saved.hidden:[],rejections:saved.rejections&&typeof saved.rejections==='object'?saved.rejections:{}};
+  }catch{return {impute:false,completed:{},hidden:[],rejections:{},storageError:true};}
 }
 function writeLearningSettings(value){
+  if(readLearningSettings().storageError){showToast('No se pudieron leer tus preferencias; no se reemplazaron');return false;}
   try{localStorage.setItem('asclepio_learning_'+user.id,JSON.stringify(value));return true;}
   catch{showToast('No se pudo guardar en este dispositivo');return false;}
 }
@@ -718,7 +728,7 @@ function ensureMicroModels(){
     const finish=models=>{if(finished)return;finished=true;clearTimeout(timer);worker?.terminate();resolve(models);};
     const fallback=()=>{worker?.terminate();setTimeout(()=>{try{finish(trainMicroModels(BASICS));}catch{finish(null);}},0);};
     try{
-      worker=new Worker(new URL('./nutritionWorker.js?v=29',import.meta.url),{type:'module'});
+      worker=new Worker(new URL('./nutritionWorker.js?v=30',import.meta.url),{type:'module'});
       worker.onmessage=ev=>ev.data.models?finish(ev.data.models):fallback();
       worker.onerror=ev=>{ev.preventDefault();fallback();};
       timer=setTimeout(fallback,15000);worker.postMessage('train');
@@ -741,23 +751,26 @@ function renderSmartFood(){
   const logs=energyFoods && energyOwner===user.id ? energyFoods.filter(r=>r.log_date<=viewDate) : recentEntries.filter(e=>e.kind==='food' && e.date<=viewDate).map(e=>e.data);
   const meal=isViewingToday()?guessMomento():'Cena';
   const completeMacros=todayFoodRows.every(r=>r.kcal!=null && r.protein_g!=null);
-  const result=recommendFoods({catalog:learningCatalog(),targets,totals,coverage,goals,kcal,protein,logs,meal,hidden:settings.hidden,completeMacros});
+  let tolerance={};try{tolerance=Object.fromEntries(Object.entries(gutStorage(user.id,localStorage).load().tolerance).map(([key,value])=>[key,value.portion]));}catch{/* el diario indica su error sin reemplazar datos */}
+  const rejected=[...new Set([...settings.hidden,...Object.keys(settings.rejections)])];
+  const result=recommendFoods({catalog:learningCatalog(),targets,totals,coverage,goals,kcal,protein,logs,meal,hidden:rejected,completeMacros,tolerance});
   const complete=todayFoodRows.length>0 && settings.completed[viewDate]===foodSignature(todayFoodRows);
   wrap.innerHTML=`<p class="form-hint">Para ${meal.toLowerCase()} · ${result.preference.active?'preferencias aprendidas y metas':'metas registradas; recopilando preferencias'}. Revisa ingredientes y porción.</p>
-    ${result.items.length?result.items.map((item,i)=>`<div class="smart-food"><button class="smart-food-main" type="button" data-smart-food="${i}"><b>${escapeHtml(item.food.name)}</b><span>${item.portion} g · ${item.kcal} kcal · ${escapeHtml(item.reason)}</span><small>Elegir porción ›</small></button><button class="smart-hide" data-smart-hide="${i}" type="button" aria-label="Ocultar ${escapeHtml(item.food.name)}">×</button></div>`).join(''):`<p class="form-hint">${completeMacros?'Sin sugerencias con los datos y el margen calórico actuales.':'Faltan calorías o proteína en algunos registros; completa esos datos para recibir sugerencias.'}</p>`}
+    ${result.items.length?result.items.map((item,i)=>`<div class="smart-food"><button class="smart-food-main" type="button" data-smart-food="${i}"><b>${escapeHtml(item.food.name)}</b><span>${item.portion} g · ${item.kcal} kcal · ${escapeHtml(item.reason)}</span><small>Elegir porción ›</small></button><button class="smart-hide" data-smart-hide="${i}" type="button" aria-label="No me gusta ${escapeHtml(item.food.name)}" title="No me gusta">×</button></div>`).join(''):`<p class="form-hint">${completeMacros?'Sin sugerencias con los datos y el margen calórico actuales.':'Faltan calorías o proteína en algunos registros; completa esos datos para recibir sugerencias.'}</p>`}
     <label class="learning-toggle"><input id="completeFoodDay" type="checkbox" ${complete?'checked':''} ${todayFoodRows.length?'':'disabled'}> He registrado toda la comida de este día</label>
     <p class="form-hint">Marca también aceites, bebidas y extras. Si cambias registros, tendrás que confirmar el día otra vez. No suma puntos.</p>
-    <details class="more-fields"><summary>Personalización y alimentos ocultos</summary><p>El modelo aprende qué alimentos eliges en cada comida; se activa con al menos 40 registros en 14 días si mejora un 5 % la pérdida logarítmica frente a la frecuencia global en días posteriores. ${result.preference.count} registros disponibles.${result.preference.validation?` Prueba: ${result.preference.validation} registros; error ${result.preference.error.toFixed(2)} vs ${result.preference.baseline.toFixed(2)}.`:''} Los micros incompletos no se interpretan como carencias.</p><button class="btn-link" id="resetHiddenFoods" type="button">Mostrar alimentos ocultos (${settings.hidden.length})</button></details>`;
+    <details class="more-fields"><summary>Preferencias y alimentos que no te gustan</summary><p>Agregar y repetir son señales positivas. La × significa «no me gusta» para ese alimento, sin rechazar su categoría. Ignorar sugerencias o cancelar no expresa desagrado. Tus registros habituales guían variantes de función culinaria y macros similares; se identifica el alimento de referencia.</p><p>El modelo por comida exige 40 registros en 14 días y mejora del 5 % en días posteriores. ${result.preference.count} registros disponibles.${result.preference.validation?` Prueba: ${result.preference.validation} registros; error ${result.preference.error.toFixed(2)} vs ${result.preference.baseline.toFixed(2)}.`:''} Preferencias guardadas solo en este dispositivo.</p>${rejected.map(key=>`<button class="btn-link" data-restore-preference="${escapeHtml(key)}" type="button">Volver a sugerir: ${escapeHtml(settings.rejections[key]?.name||learningCatalog().find(f=>(f.usda_fdc_id?'fdc:'+f.usda_fdc_id:'id:'+f.id)===key)?.name||key)}</button>`).join('')}<button class="btn-link" id="resetHiddenFoods" type="button">Restaurar todos (${rejected.length})</button></details>`;
   wrap.querySelectorAll('[data-smart-food]').forEach(button=>button.addEventListener('click',()=>{
     const item=result.items[Number(button.dataset.smartFood)];
     pendingMomento=meal;
     openQuantityStep({...item.food,_last:{quantity:item.quantity,label:item.food.name+' · '+item.portion+' g'}});
   }));
   wrap.querySelectorAll('[data-smart-hide]').forEach(button=>button.addEventListener('click',()=>{
-    const next=readLearningSettings();next.hidden=[...new Set([...next.hidden,result.items[Number(button.dataset.smartHide)].key])];
-    if(writeLearningSettings(next))renderSmartFood();
+    const next=readLearningSettings(),item=result.items[Number(button.dataset.smartHide)];next.rejections[item.key]={name:item.food.name,reason:'dislike',at:new Date().toISOString()};
+    if(writeLearningSettings(next)){renderSmartFood();showToast('No volveremos a sugerir este alimento');}
   }));
-  document.getElementById('resetHiddenFoods').onclick=()=>{if(writeLearningSettings({...readLearningSettings(),hidden:[]}))renderSmartFood();};
+  document.getElementById('resetHiddenFoods').onclick=()=>{if(writeLearningSettings({...readLearningSettings(),hidden:[],rejections:{}}))renderSmartFood();};
+  wrap.querySelectorAll('[data-restore-preference]').forEach(button=>button.onclick=()=>{const next=readLearningSettings(),key=button.dataset.restorePreference;next.hidden=next.hidden.filter(value=>value!==key);delete next.rejections[key];if(writeLearningSettings(next))renderSmartFood();});
   document.getElementById('completeFoodDay').onchange=ev=>{
     const next=readLearningSettings();
     if(ev.target.checked)next.completed[viewDate]=foodSignature(todayFoodRows);else delete next.completed[viewDate];
@@ -1000,6 +1013,11 @@ function openActivityForm(typeKey, existing = null){
   renderFields();
 
   if(typeKey === 'sueno') wireSleepJournal(card, data, user.id);
+  if(typeKey === 'bano'){
+    wireBowelFields(card,data);
+    const view=document.createElement('button');view.className='btn-link';view.type='button';view.textContent='Ver salud digestiva';
+    view.onclick=()=>{closeForm();openGut();};card.appendChild(view);
+  }
 
   const saveLabel = existing ? 'Guardar cambios' : 'Guardar';
   const actions = document.createElement('div');
@@ -1052,6 +1070,7 @@ function openActivityForm(typeKey, existing = null){
       }
     }
     if(typeKey === 'sueno' && !validateSleepJournal(card)) return;
+    if(typeKey === 'bano' && !validateBowelFields(card)) return;
     if(typeKey === 'sueno' && data.intentoDormir && minsBetween(data.intentoDormir,data.horaDormir) > 360){ showToast('Revisa la hora en que intentaste dormir (máximo 6 h antes de dormirte)'); return; }
     if(typeKey === 'sueno' && calcSleep(data).dur == null){
       showToast('Revisa las horas: entre 0 y 16 h, y menos minutos despierto que en cama'); return;
@@ -1063,7 +1082,8 @@ function openActivityForm(typeKey, existing = null){
   });
   if(showRest){
     card.querySelector('#restBtn').addEventListener('click', (ev) => {
-      persist({ ...t.restAction.data }, ev.currentTarget, t.restAction.label);
+      if(typeKey==='bano' && !validateBowelFields(card))return;
+      persist(typeKey==='bano'?{...data,...t.restAction.data,bristol:null,tipo:null}:{ ...t.restAction.data }, ev.currentTarget, t.restAction.label);
     });
   }
   if(existing){
@@ -1090,6 +1110,7 @@ async function afterChange(){
   await refreshAfterLog();
   if(document.getElementById('panel-historial').classList.contains('active')) await renderHistory();
   if(document.getElementById('panel-sueno').classList.contains('active')) await renderSleep();
+  if(document.getElementById('panel-digestivo').classList.contains('active')) await openGut();
 }
 
 /* ================= formulario: comida ================= */
@@ -2254,7 +2275,7 @@ function renderDaily(){
   // uno por día: si ya está, tocarlo lo abre para cambiarlo (no crea otro)
   dayTiles.querySelector('#tileGym').addEventListener('click', () => openActivityForm('gym', lastOfType('gym')));
   dayTiles.querySelector('#tileSleep').addEventListener('click', () => openActivityForm('sueno', lastOfType('sueno')));
-  dayTiles.querySelector('#tileBano').addEventListener('click', () => openActivityForm('bano'));
+  dayTiles.querySelector('#tileBano').addEventListener('click', openGut);
   dayTiles.querySelector('#tileEnergia').addEventListener('click', () => openActivityForm('energia'));
   renderMicros();
   renderSmartFood();

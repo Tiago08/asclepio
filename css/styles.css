@@ -928,6 +928,20 @@ button:focus-visible, summary:focus-visible{ outline: 2px solid var(--accent); o
 .micro-row.is-partial .micro-fill,.micro-row.is-info .micro-fill{ background:var(--text-dim); }
 #energyModelCard a,.micro-acc a{ color:var(--accent); font-size:12px; }
 #completeDaysArea{ max-height:280px; overflow-y:auto; }
+.gut-local-note{ font-size:12px; color:var(--text-dim); line-height:1.6; margin-bottom:18px; }
+.gut-alert{ padding:16px; border-radius:var(--r-md); background:color-mix(in srgb,var(--danger) 14%,var(--surface)); color:var(--text); margin-bottom:16px; line-height:1.6; }
+#gutArea .data-card h2{ font-size:16px; font-weight:500; }
+#gutArea .data-card > summary{ cursor:pointer; font-size:15px; min-height:48px; padding:12px 0; }
+#gutArea a{ color:var(--accent); font-size:12px; overflow-wrap:anywhere; }
+.gut-entry{ display:block; min-height:48px; padding:12px 0; text-align:left; width:100%; background:none; border:0; color:var(--text-dim); font-size:13px; }
+.gut-entry span{ color:var(--accent); }
+.gut-catalog{ max-height:260px; overflow:auto; margin-top:12px; }
+.gut-product{ padding:12px 0; margin-bottom:16px; }
+.gut-product,.gut-entry,#gutArea p{ overflow-wrap:anywhere; }
+#gutArea summary{ cursor:pointer; }
+#gutArea form{ margin:16px 0; }
+#gutArea form button[type=submit]{ width:100%; min-height:48px; }
+#gutStatus{ color:var(--accent); font-size:13px; margin-bottom:14px; }
 @media (max-width:359px){
   .shell{ padding-left:16px; padding-right:16px; }
   .wordmark{ font-size:14px; }

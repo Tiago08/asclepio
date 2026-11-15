@@ -216,7 +216,7 @@ export const supabase = {
   assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('asclepio_sleep_test-user')).fields.includes('ruido')),true);
   assert.equal(await page.evaluate(()=>window.db.activity_logs[0].data.duracion_h),7.5);
   await page.locator('button[data-tab="ranking"]').click();
-  const ranking=await page.evaluate(async()=> (await import('/js/activity.js?v=29')).getRanking('2000-01-01'));
+  const ranking=await page.evaluate(async()=> (await import('/js/activity.js?v=30')).getRanking('2000-01-01'));
   assert.equal(ranking[0].points_total,1100);
   const pointReads=await page.evaluate(()=>window.reads.filter(t=>t==='daily_points').length);
   await page.locator('[data-rank-mode="total"]').click();
@@ -226,16 +226,16 @@ export const supabase = {
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=390),true,tab+' sin desbordamiento');
   }
   const metrics=await page.evaluate(async()=>{
-   const m=await import('/js/sleep.js?v=29');
+   const m=await import('/js/sleep.js?v=30');
    return [m.sleepMetrics({horaDormir:'23:30',horaDespertar:'07:00',despierto_min:30}),m.sleepMetrics({horaDormir:'07:00',horaDespertar:'07:00'}),m.sleepScore([],420)];
   });
   assert.equal(metrics[0].dur,420);assert.equal(metrics[1].dur,null);assert.equal(metrics[2],null);
-  const invalid=await page.evaluate(async()=> (await import('/js/health.js?v=29')).suggestGoals({sex:'hombre',height_cm:175,birth_year:2020,training_days:3},75));
+  const invalid=await page.evaluate(async()=> (await import('/js/health.js?v=30')).suggestGoals({sex:'hombre',height_cm:175,birth_year:2020,training_days:3},75));
   assert.equal(invalid,null);
   // Límites del cálculo y sueño cruzando medianoche, sin datos suficientes.
   const boundary=await page.evaluate(async()=>{
-   const {suggestGoals}=await import('/js/health.js?v=29');
-   const {sleepMetrics,sleepScore}=await import('/js/sleep.js?v=29');
+   const {suggestGoals}=await import('/js/health.js?v=30');
+   const {sleepMetrics,sleepScore}=await import('/js/sleep.js?v=30');
    const s=suggestGoals({sex:'hombre',height_cm:175.5,birth_year:2001,training_days:0,pace_kg_week:-0.75},74.5,2026);
    return {floor:s.goals.goal_kcal>=10*74.5+6.25*175.5-5*25+5,
     awake:sleepMetrics({horaDormir:'23:00',horaDespertar:'07:00',despierto_min:480}).dur,
@@ -282,8 +282,8 @@ export const supabase = {
    await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR,'sueno.png'),fullPage:true});
   }
   const nutrientChecks=await page.evaluate(async()=>{
-   const {microTotals,microStatus,microTargets}=await import('/js/micros.js?v=29');
-   const {usdaFoodToRow}=await import('/js/foods.js?v=29');
+   const {microTotals,microStatus,microTargets}=await import('/js/micros.js?v=30');
+   const {usdaFoodToRow}=await import('/js/foods.js?v=30');
    const a=microTotals([{iron_mg:0,micros:{zinc_mg:1}},{iron_mg:null,micros:{zinc_mg:''}}]);
    const target=microTargets('mujer',30,2000).find(t=>t.key==='iron_mg');
    const converted=usdaFoodToRow({fdcId:1,description:'Test',foodNutrients:[
@@ -310,7 +310,12 @@ export const supabase = {
   assert.ok(await page.locator('[data-smart-food]').count()>0);
   const firstSuggestion=await page.locator('[data-smart-food]').first().textContent();
   await page.locator('[data-smart-hide]').first().click();
+  assert.equal(await page.evaluate(()=>Object.values(JSON.parse(localStorage.getItem('asclepio_learning_test-user')).rejections)[0].reason),'dislike');
   assert.notEqual(await page.locator('[data-smart-food]').first().textContent(),firstSuggestion);
+  await page.locator('#smartFoodArea details summary').click();
+  await page.locator('[data-restore-preference]').first().click();
+  assert.equal(await page.locator('[data-smart-food]').first().textContent(),firstSuggestion);
+  await page.locator('[data-smart-hide]').first().click();
   await page.locator('#smartFoodArea details summary').click();
   await page.locator('#resetHiddenFoods').click();
   assert.equal(await page.locator('[data-smart-food]').first().textContent(),firstSuggestion);
@@ -326,7 +331,7 @@ export const supabase = {
   await page.waitForFunction(()=>document.querySelector('#microArea').textContent.includes('1 de 7 modelos superan la referencia'));
   assert.equal(await page.evaluate(()=>window.writes.length),beforeEstimate,'Entrenar no escribe datos');
   await page.evaluate(async()=>{
-   const {BASICS}=await import('/js/basics.js?v=29');
+   const {BASICS}=await import('/js/basics.js?v=30');
    const f={...BASICS.find(f=>f.name==='Avena en hojuelas'),id:'synthetic-food',usda_fdc_id:'synthetic-food',name:'Prueba ML'};
    f.micros={...f.micros};delete f.micros.zinc_mg;
    window.db.foods.push(f);
@@ -352,8 +357,8 @@ export const supabase = {
   await page.locator('[data-complete-date]').first().check();
   const learningWrites=await page.evaluate(()=>window.writes.length);
   await page.evaluate(async()=>{
-   const {foodSignature}=await import('/js/intelligence.js?v=29');
-   const {suggestGoals}=await import('/js/health.js?v=29');
+   const {foodSignature}=await import('/js/intelligence.js?v=30');
+   const {suggestGoals}=await import('/js/health.js?v=30');
    const day=n=>{const d=new Date();d.setDate(d.getDate()-n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
    const body=window.db.body_profiles[0],prior=suggestGoals(body,80).tdee,actual=prior+400;
    const foods=[],weights=[],completed={};
@@ -375,6 +380,55 @@ export const supabase = {
   assert.match(await page.locator('#goalStatus').textContent(),/sin guardar/);
   assert.equal(await page.evaluate(()=>window.writes.length),learningWrites,'Proponer no guarda metas');
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=390),true);
+  // Salud digestiva y preferencias explícitas: ninguna impresión equivale a rechazo.
+  await page.locator('button[data-tab="hoy"]').click();
+  const preferenceSnapshot=await page.evaluate(()=>localStorage.getItem('asclepio_learning_test-user'));
+  await page.locator('#smartDiary > summary').click();
+  assert.equal(await page.evaluate(()=>localStorage.getItem('asclepio_learning_test-user')),preferenceSnapshot);
+  await page.locator('#tileBano').click();
+  await page.waitForSelector('#gutRegister');
+  assert.equal(await page.locator('.tab-btn').count(),5);
+  assert.match(await page.locator('#gutArea').textContent(),/frecuencia desconocida/);
+  const gutWrites=await page.evaluate(()=>window.writes.length);
+  await page.locator('#gutContext > summary').click();
+  await page.locator('#g_pain').fill('0');await page.locator('#g_bloating').fill('0');await page.locator('#g_stress').fill('4');
+  await page.locator('#g_blood').selectOption('no');
+  await page.locator('#gutDayForm button[type="submit"]').click();
+  const context=await page.evaluate(()=>Object.values(JSON.parse(localStorage.getItem('asclepio_gut_test-user')).days)[0]);
+  assert.equal(context.pain,0);assert.equal(context.medicationTaken,null);assert.equal(context.blood,false);
+  assert.equal(await page.evaluate(()=>window.writes.length),gutWrites,'Contexto y probióticos locales no escriben puntos ni actividades');
+  await page.locator('#g_blood').selectOption('yes');await page.locator('#gutDayForm button[type="submit"]').click();
+  assert.match(await page.locator('.gut-alert').textContent(),/valoración médica/);
+  await page.locator('#gutProbiotics > summary').click();
+  await page.locator('#p_name').fill('Producto <script> literal');await page.locator('#p_species').fill('Especie declarada');
+  await page.locator('#p_strain').fill('Cepa de prueba');await page.locator('#p_cfu').fill('1000000000');
+  await page.locator('#p_evidence').fill('https://pubmed.ncbi.nlm.nih.gov/34256014/');
+  await page.locator('#gutProductForm button[type="submit"]').click();
+  assert.equal(await page.locator('#gutProductList script').count(),0);
+  assert.match(await page.locator('#gutProductList').textContent(),/Producto <script> literal/);
+  await page.locator('[data-gut-taken]').check();
+  await page.locator('[data-gut-product]').click();
+  await page.locator('#p_storage').fill('Según etiqueta');
+  await page.locator('#gutProductForm button[type="submit"]').click();
+  assert.equal(await page.locator('[data-gut-taken]').isChecked(),true,'Editar la ficha conserva las tomas');
+  assert.equal(await page.evaluate(()=>window.writes.length),gutWrites);
+  const downloading=page.waitForEvent('download');await page.locator('#gutExport').click();
+  const downloaded=await downloading;const digestiveReport=fs.readFileSync(await downloaded.path(),'utf8');
+  assert.match(digestiveReport,/dolor 0\/10/);assert.match(digestiveReport,/Cepa de prueba/);
+  await page.locator('#gutRegister').click();await page.locator('#b_bristol').selectOption('4');
+  await page.locator('#b_dolor').fill('0');await page.locator('#b_hinchazon').fill('2');
+  await page.locator('#b_esfuerzo').fill('1');await page.locator('#b_urgencia').fill('3');
+  await page.locator('#saveBtn').click();
+  await page.waitForFunction(()=>window.db.activity_logs.some(r=>r.type==='bano'&&r.data.bristol===4));
+  await page.waitForSelector('[data-gut-edit]');
+  assert.match(await page.locator('[data-gut-edit]').first().textContent(),/Dolor 0\/10/);
+  await page.locator('[data-gut-edit]').first().click();await page.locator('#restBtn').click();
+  await page.waitForFunction(()=>window.db.activity_logs.some(r=>r.type==='bano'&&r.data.fue===false));
+  const noBowel=await page.evaluate(()=>window.db.activity_logs.find(r=>r.type==='bano').data);
+  assert.equal(noBowel.dolor,0);assert.equal(noBowel.bristol,null);
+  await page.waitForSelector('#gutRegister');
+  if(process.env.SCREENSHOT_DIR)await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR,'salud-digestiva.png'),fullPage:true});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=390),true,'Diario digestivo sin desbordamiento');
   assert.deepEqual(errors,[]);
   console.log('OK: decimales, nutrientes, validación, objetivos, historial, fallo de guardado, sueño, ranking paginado y 5 pestañas a 390x844; sin errores de consola.');
  } finally {await browser.close();}

@@ -1,4 +1,4 @@
-import { sleepMetrics } from './sleep.js?v=29';
+import { sleepMetrics } from './sleep.js?v=30';
 
 export const JOURNAL_FIELDS = [
   {key:'intentoDormir',label:'Intentaste dormir',type:'time'},
