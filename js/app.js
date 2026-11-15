@@ -1,27 +1,27 @@
-import { sleepMetrics, sleepReference, sleepScore } from './sleep.js?v=24';
-import { supabase } from './supabaseClient.js?v=24';
+import { sleepMetrics, sleepReference, sleepScore } from './sleep.js?v=25';
+import { supabase } from './supabaseClient.js?v=25';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js?v=24';
+} from './auth.js?v=25';
 import {
   NUTRIENT_FIELDS, MICRO_FIELDS, searchUsda, searchLocalFoods, searchFavorites, updateFood,
   cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, moveFoodLog, restoreFoodLog, copyFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel, pluralEs
-} from './foods.js?v=24';
+} from './foods.js?v=25';
 import {
   logActivity, updateActivityLog, restoreActivityLog, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking
-} from './activity.js?v=24';
-import { buildReportText, downloadText } from './report.js?v=24';
-import { BASICS, searchBasics } from './basics.js?v=24';
-import { normalizeText } from './foodDict.js?v=24';
+} from './activity.js?v=25';
+import { buildReportText, downloadText } from './report.js?v=25';
+import { BASICS, searchBasics } from './basics.js?v=25';
+import { normalizeText } from './foodDict.js?v=25';
 import {
   getGoalHistory, saveGoalsFrom, goalsForDate, getBodyProfile, saveBodyProfile, suggestGoals, PACES, paceOf, objectiveOf,
   getWeights, saveWeight, deleteWeight, getSupplements, addSupplement, retireSupplement,
   getSupplementLogs, getSupplementLogsInRange, setSupplementTaken, getWaterLogs, addWater, deleteWater,
   electrolyteTotals, getCombos, createCombo, deleteCombo
-} from './health.js?v=24';
-import { HABIT_MOMENTS, getHabits, addHabit, updateHabit, archiveHabit, getHabitLogs, setHabitDone } from './habits.js?v=24';
-import { microTargets, microTotals, microStatus } from './micros.js?v=24';
+} from './health.js?v=25';
+import { HABIT_MOMENTS, getHabits, addHabit, updateHabit, archiveHabit, getHabitLogs, setHabitDone } from './habits.js?v=25';
+import { microTargets, microTotals, microStatus } from './micros.js?v=25';
 
 /* ================= actualización automática ================= */
 /* GitHub Pages deja guardar index.html hasta 10 min y la app instalada en el
@@ -616,6 +616,7 @@ async function bootApp(){
     return;
   }
   document.getElementById('displayNameInput').value = profile.display_name;
+  document.getElementById('accountSummary').textContent = profile.display_name;
   await loadPhase2Data();
   fillGoalInputs();
   fillBodyInputs();
@@ -2923,7 +2924,14 @@ const GOAL_INPUTS = { goal_kcal: 'goalKcal', goal_protein_g: 'goalProtein', goal
 function fillGoalInputs(g = goalsFor(todayStr()), dirty = false){
   Object.entries(GOAL_INPUTS).forEach(([k, id]) => { document.getElementById(id).value = String(Number(g[k])).replace('.', ','); });
   setGoalsDirty(dirty);
+  paintGoalOverview();
 }
+function paintGoalOverview(){
+  const g = goalsFor(todayStr());
+  const fmt = n => Number(n).toLocaleString('es-VE', { maximumFractionDigits: 1 });
+  document.getElementById('goalOverview').innerHTML = `<div class="goal-energy"><b>${fmt(g.goal_kcal)}</b><span>kcal al día</span></div><div class="goal-macro-summary">${[['Proteína',g.goal_protein_g,'g'],['Carbos',g.goal_carbs_g,'g'],['Grasa',g.goal_fat_g,'g'],['Agua',g.goal_water_ml / 1000,'L']].map(([label,value,unit]) => `<div><span>${label}</span><b>${fmt(value)} <small>${unit}</small></b></div>`).join('')}</div>`;
+}
+document.getElementById('cancelGoalEdit').addEventListener('click', () => { fillGoalInputs(); document.getElementById('goalEditor').open = false; });
 function readGoalInputs(){
   const out = {};
   Object.entries(GOAL_INPUTS).forEach(([k, id]) => { out[k] = foodDecimal(document.getElementById(id).value); });
@@ -2977,6 +2985,8 @@ document.getElementById('saveGoalsBtn').addEventListener('click', async (ev) => 
   try{
     await saveGoals(goals);
     setGoalsDirty(false);
+    paintGoalOverview();
+    document.getElementById('goalEditor').open = false;
     renderSuggestion();
     showToast('Meta guardada desde hoy');
   }catch(err){ showToast('Error: ' + err.message); btn.disabled = false; }
@@ -3117,6 +3127,7 @@ document.getElementById('saveObjectiveBtn').addEventListener('click', async (ev)
     catch(err){ if(err.saved){ bodyProfile = err.saved; showError(err.message); } else throw err; }
     // la meta calculada va a los campos de arriba: la ajustas y la guardas tú
     fillGoalInputs(proposal, true);
+    document.getElementById('goalEditor').open = true;
     document.getElementById('calcGoals').open = false;
     document.querySelector('#panel-datos .goal-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
     showToast('Revisa los valores y toca Guardar cambios desde hoy');
@@ -3128,6 +3139,7 @@ document.getElementById('saveObjectiveBtn').addEventListener('click', async (ev)
 
 function renderWeights(){
   const wrap = document.getElementById('weightList');
+  document.getElementById('weightSummary').textContent = weights.length ? `${String(weights[0].weight_kg).replace('.', ',')} kg` : 'Sin registros';
   if(!weights.length){ wrap.innerHTML = `<div class="search-empty">Todavía no hay pesos registrados.</div>`; return; }
   const asc = weights.slice(0, 60).reverse();   // del más viejo al más nuevo
   let chart = '';
@@ -3192,6 +3204,8 @@ document.getElementById('saveNameBtn').addEventListener('click', async () => {
   try{
     await updateDisplayName(user.id, val);
     profile.display_name = val;
+    document.getElementById('accountSummary').textContent = val;
+    document.querySelector('.account-editor').open = false;
     showToast('Nombre actualizado');
   }catch(err){ showToast('Error: ' + err.message); }
 });

@@ -832,4 +832,39 @@ header{
 .sleep-guide summary{ cursor: pointer; font-size: 15px; padding: 4px 0; }
 .sleep-sources a{ color: var(--c-sueno); }
 #sleepBarDetail{ min-height: 1.5em; font-size: 12px; }
+
+/* Mis datos: resumen primero, edición bajo demanda. */
+.data-heading{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin:24px 0 8px; }
+.data-heading h1{ font-size:28px; letter-spacing:-1px; margin:4px 0 0; }
+.data-eyebrow{ font-size:10px; letter-spacing:2px; color:var(--text-faint); margin:0; }
+.privacy-pill{ font-size:11px; color:var(--text-dim); background:var(--surface-raised); padding:7px 11px; border-radius:99px; }
+.data-intro{ font-size:14px; color:var(--text-dim); margin:0 0 22px; }
+.data-card-heading{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.data-card-heading h2{ font-size:15px; margin:0; font-weight:500; }
+.data-card-heading #goalStatus{ font-size:10px; margin:0; text-align:right; max-width:115px; }
+.goal-overview{ padding:22px 0 18px; }
+.goal-energy{ display:flex; align-items:baseline; gap:10px; }
+.goal-energy b{ font-size:38px; font-weight:500; letter-spacing:-1.5px; color:var(--accent); }
+.goal-energy > span{ font-size:13px; color:var(--text-dim); }
+.goal-macro-summary{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:20px; }
+.goal-macro-summary div{ display:flex; flex-direction:column; gap:7px; }
+.goal-macro-summary span{ font-size:11px; color:var(--text-faint); }
+.goal-macro-summary b{ font-size:16px; font-weight:500; }
+.goal-macro-summary small{ font-size:11px; color:var(--text-dim); }
+.goal-editor > summary{ padding:14px 0; color:var(--accent); font-size:14px; cursor:pointer; }
+.goal-editor[open] > summary{ margin-bottom:10px; }
+.calculator-card{ padding:0 18px; }
+.calculator-card .calc-goals{ margin:0; }
+.calculator-card .calc-goals > summary, .account-editor > summary{ display:flex; align-items:center; justify-content:space-between; gap:14px; list-style:none; cursor:pointer; min-height:72px; padding:12px 0; box-sizing:border-box; }
+.calculator-card summary::-webkit-details-marker,.account-editor summary::-webkit-details-marker{ display:none; }
+.calculator-card summary b,.account-editor summary b{ font-size:14px; font-weight:500; color:var(--text); }
+.calculator-card summary small,.account-editor summary small{ display:block; font-size:12px; color:var(--text-faint); margin-top:5px; line-height:1.4; }
+.calculator-card details[open] > summary .dl-arrow,.account-editor[open] > summary .dl-arrow{ transform:rotate(90deg); }
+.account-editor{ padding:0 18px; }
+.account-editor[open]{ padding-bottom:18px; }
+#weightSummary{ font-size:14px; color:var(--accent); }
+.goal-card{ padding-bottom:4px; }
+.calculator-card .calc-goals > summary::before{ display:none; }
+.data-card-heading #goalStatus{ font-size:11px; }
+.report-label{ display:block; font-size:12px; color:var(--text-dim); margin-bottom:8px; }
 button:focus-visible, summary:focus-visible{ outline: 2px solid var(--accent); outline-offset: 3px; }

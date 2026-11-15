@@ -85,6 +85,8 @@ export const supabase = {
   await page.locator('button[data-tab="datos"]').click();
   // Primer uso: el cálculo se abre, con un solo paso visible.
   assert.equal(await page.locator('[data-objective-step]:visible').count(),1);
+  assert.equal(await page.locator('#goalKcal').isVisible(),false);
+  assert.match(await page.locator('#goalOverview').textContent(),/2.000/);
   await page.locator('#objectiveNext').click();
   assert.match(await page.locator('#objectiveProgress').textContent(),/Paso 1/);
   await page.locator('[data-sex="hombre"]').click();
@@ -100,14 +102,19 @@ export const supabase = {
   assert.equal(await page.evaluate(()=>window.db.profiles[0].goal_kcal),2000);
   await page.locator('#saveGoalsBtn').click();
   await page.waitForFunction(()=>document.querySelector('#goalStatus').textContent==='Esta es tu meta actual');
+  assert.equal(await page.locator('#goalKcal').isVisible(),false);
   assert.equal(await page.evaluate(()=>window.db.goal_history.length),2);
   assert.equal(await page.evaluate(()=>window.db.goal_history[0].goal_kcal),2000);
+  await page.locator('#goalEditor summary').click();
   await page.locator('#goalKcal').fill('2345');
   await page.evaluate(()=>window.failTable='goal_history');
   await page.locator('#saveGoalsBtn').click();
   await page.waitForFunction(()=>!document.querySelector('#saveGoalsBtn').disabled);
   assert.match(await page.locator('#goalStatus').textContent(),/sin guardar/);
   await page.evaluate(()=>window.failTable=null);
+  await page.locator('#cancelGoalEdit').click();
+  assert.equal(await page.locator('#goalKcal').isVisible(),false);
+  assert.equal(await page.locator('#goalStatus').textContent(),'Esta es tu meta actual');
   await page.locator('button[data-tab="sueno"]').click();
   await page.waitForSelector('.sleep-score');
   assert.match(await page.locator('.sleep-score').textContent(),/96/);
@@ -126,23 +133,23 @@ export const supabase = {
   await page.waitForFunction(()=>window.db.activity_logs[0].data.despierto_min==='30');
   assert.equal(await page.evaluate(()=>window.db.activity_logs[0].data.duracion_h),7.5);
   await page.locator('button[data-tab="ranking"]').click();
-  const ranking=await page.evaluate(async()=> (await import('/js/activity.js?v=24')).getRanking('2000-01-01'));
+  const ranking=await page.evaluate(async()=> (await import('/js/activity.js?v=25')).getRanking('2000-01-01'));
   assert.equal(ranking[0].points_total,1100);
   for(const tab of ['hoy','habitos','sueno','ranking','datos']){
    await page.locator('button[data-tab="'+tab+'"]').click();
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=390),true,tab+' sin desbordamiento');
   }
   const metrics=await page.evaluate(async()=>{
-   const m=await import('/js/sleep.js?v=24');
+   const m=await import('/js/sleep.js?v=25');
    return [m.sleepMetrics({horaDormir:'23:30',horaDespertar:'07:00',despierto_min:30}),m.sleepMetrics({horaDormir:'07:00',horaDespertar:'07:00'}),m.sleepScore([],420)];
   });
   assert.equal(metrics[0].dur,420);assert.equal(metrics[1].dur,null);assert.equal(metrics[2],null);
-  const invalid=await page.evaluate(async()=> (await import('/js/health.js?v=24')).suggestGoals({sex:'hombre',height_cm:175,birth_year:2020,training_days:3},75));
+  const invalid=await page.evaluate(async()=> (await import('/js/health.js?v=25')).suggestGoals({sex:'hombre',height_cm:175,birth_year:2020,training_days:3},75));
   assert.equal(invalid,null);
   // Límites del cálculo y sueño cruzando medianoche, sin datos suficientes.
   const boundary=await page.evaluate(async()=>{
-   const {suggestGoals}=await import('/js/health.js?v=24');
-   const {sleepMetrics,sleepScore}=await import('/js/sleep.js?v=24');
+   const {suggestGoals}=await import('/js/health.js?v=25');
+   const {sleepMetrics,sleepScore}=await import('/js/sleep.js?v=25');
    const s=suggestGoals({sex:'hombre',height_cm:175.5,birth_year:2001,training_days:0,pace_kg_week:-0.75},74.5,2026);
    return {floor:s.goals.goal_kcal>=10*74.5+6.25*175.5-5*25+5,
     awake:sleepMetrics({horaDormir:'23:00',horaDespertar:'07:00',despierto_min:480}).dur,
@@ -167,6 +174,17 @@ export const supabase = {
   await page.waitForFunction(()=>window.db.weight_logs.length===0);
   await page.locator('#toast button').click();
   await page.waitForFunction(()=>window.db.weight_logs.length===1);
+  const account=page.locator('.account-editor').first();
+  assert.equal(await page.locator('#displayNameInput').isVisible(),false);
+  await account.locator('summary').click();
+  await page.getByLabel('Nombre', {exact:true}).fill('Santiago UX');
+  await page.locator('#saveNameBtn').click();
+  await page.waitForFunction(()=>document.querySelector('#accountSummary').textContent==='Santiago UX');
+  assert.equal(await page.locator('#displayNameInput').isVisible(),false);
+  await page.locator('.account-editor').last().locator('summary').click();
+  await page.getByLabel('Período del reporte').selectOption('week');
+  assert.equal(await page.locator('#reportBtn').isVisible(),true);
+  await page.locator('.account-editor').last().locator('summary').click();
   if(process.env.SCREENSHOT_DIR){
    await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR,'datos.png'),fullPage:true});
    await page.locator('#calcGoals summary').click();
