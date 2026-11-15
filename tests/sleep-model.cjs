@@ -4,7 +4,7 @@ const assert=require('node:assert/strict');
 const uri=s=>'data:text/javascript;base64,'+Buffer.from(s).toString('base64');
 (async()=>{
  const sleep=uri(fs.readFileSync(path.join(__dirname,'../js/sleep.js'),'utf8'));
- const source=fs.readFileSync(path.join(__dirname,'../js/sleepPersonal.js'),'utf8').replace('./sleep.js?v=26',sleep);
+ const source=fs.readFileSync(path.join(__dirname,'../js/sleepPersonal.js'),'utf8').replace('./sleep.js?v=27',sleep);
  const {personalModel,nightScore,journalPatterns}=await import(uri(source));
  const rows=Array.from({length:70},(_,i)=>({date:new Date(Date.UTC(2026,0,i+1)).toISOString().slice(0,10),data:{horaDormir:'23:00',horaDespertar:'07:00',estres:i%5+1,descanso:5-i%5,calidad:4}}));
  assert.equal(personalModel(rows.slice(0,20)).state,'collecting');

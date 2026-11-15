@@ -1,4 +1,4 @@
-import { supabase } from './supabaseClient.js?v=26';
+import { supabase } from './supabaseClient.js?v=27';
 
 export async function logActivity({ userId, type, date, time, data }) {
   const { data: row, error } = await supabase
@@ -103,4 +103,20 @@ export async function getRanking(weekStart) {
     points_week: hasPoints ? (week.get(p.id) || 0) : null,
     points_total: hasPoints ? (total.get(p.id) || 0) : null
   }));
+}
+
+// Memoria de sesión: reúne consultas concurrentes y se invalida tras cada cambio.
+const recentCache = new Map();
+export function invalidateRecentEntries(){ recentCache.clear(); }
+export function getRecentEntries(userId, fromDate, toDate){
+  const key = `${userId}:${fromDate}:${toDate}`;
+  const hit = recentCache.get(key);
+  if(hit && Date.now() - hit.time < 30000) return hit.promise;
+  const entry = {time:Date.now(),promise:null};
+  entry.promise = getEntriesInRange(userId,fromDate,toDate).catch(error=>{
+    if(recentCache.get(key)===entry) recentCache.delete(key);
+    throw error;
+  });
+  recentCache.set(key,entry);
+  return entry.promise;
 }

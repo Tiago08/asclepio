@@ -7,13 +7,14 @@ const mock = `
 const date = n => { const d = new Date(); d.setDate(d.getDate()-n); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
 const profile = {id:'test-user',display_name:'Prueba',streak_current:3,streak_best:5,goal_kcal:2000,goal_protein_g:150,goal_carbs_g:200,goal_fat_g:65,goal_water_ml:2500};
 window.db = {profiles:[profile],ranking_profiles:[profile], foods:[], food_logs:[], activity_logs:[0,1,2].map(n=>({id:'sleep-'+n,user_id:'test-user',type:'sueno',log_date:date(n),log_time:'07:00',data:{horaDormir:'23:00',horaDespertar:'07:00',calidad:4}})), daily_points:Array.from({length:1100},(_,i)=>({user_id:'test-user',log_date:date(i),points:1}))};
-window.writes = [];
+window.writes = []; window.reads = [];
 export const supabase = {
  auth:{onAuthStateChange(){},getSession:async()=>({data:{session:{user:{id:'test-user',email:'test@example.com'}}}}),signOut:async()=>({}),signInWithOtp:async()=>({}),verifyOtp:async()=>({})},
  from(table){
   let filters=[], op='select', payload, single=false, order=[], from=0, to=Infinity;
   const q={select(){return q},eq(k,v){filters.push(r=>r[k]===v);return q},gte(k,v){filters.push(r=>r[k]>=v);return q},lte(k,v){filters.push(r=>r[k]<=v);return q},in(k,v){filters.push(r=>v.includes(r[k]));return q},or(){return q},order(k,o){order.push([k,o?.ascending!==false]);return q},limit(n){to=n-1;return q},range(a,b){from=a;to=b;return q},single(){single=true;return q},maybeSingle(){single=true;return q},insert(v){op='insert';payload=v;return q},update(v){op='update';payload=v;return q},upsert(v){op='upsert';payload=v;return q},delete(){op='delete';return q},then(resolve,reject){return Promise.resolve().then(()=>{
    const db=window.db; db[table] ||= [];
+   if(op==='select')window.reads.push(table);
    if(window.failTable===table && op!=='select') return {data:null,error:{message:'Fallo simulado'}};
    let rows=db[table].filter(r=>filters.every(f=>f(r)));
    if(op==='insert'||op==='upsert') {rows=(Array.isArray(payload)?payload:[payload]).map(v=>({id:crypto.randomUUID(),...v}));if(op==='upsert') for(const r of rows) db[table]=db[table].filter(x=>!(x.user_id===r.user_id && (r.valid_from ? x.valid_from===r.valid_from : r.log_date ? x.log_date===r.log_date : true)));db[table].push(...rows);}
@@ -45,6 +46,11 @@ export const supabase = {
   });
   await page.goto('http://127.0.0.1:8765');
   await page.waitForFunction(()=>window.testApp && document.querySelector('#goalKcal').value==='2000').catch(async e=>{console.error(await page.locator('body').innerText());throw e;});
+  await page.waitForFunction(()=>document.querySelector('#todayTimeline .spinner')===null && window.reads.includes('activity_logs'));
+  assert.equal(await page.evaluate(()=>window.reads.filter(t=>t==='activity_logs').length),1,'Hoy y estadísticas comparten lectura');
+  assert.equal(await page.evaluate(()=>window.reads.filter(t=>t==='daily_points').length),0,'Ranking no se carga al arrancar');
+  assert.equal(await page.evaluate(()=>window.reads.filter(t=>t==='profiles').length),1,'Una sola lectura de perfil existente');
+  console.log('Arranque: 1 lectura de actividades para Hoy + estadísticas; 0 lecturas de puntos.');
   const food={id:'food-1',name:'Alimento prueba',source:'custom',serving_label:'100 g',serving_grams:100,kcal:200,protein_g:10,carbs_g:20,fat_g:4};
   await page.evaluate(f=>window.testApp.openQuantityStep(f),food);
   await page.locator('#f_qty').fill('1');
@@ -121,7 +127,10 @@ export const supabase = {
   await page.locator('[data-sleep-day]').last().click();
   assert.match(await page.locator('#sleepBarDetail').textContent(),/8 h/);
   assert.match(await page.locator('.night-score').textContent(),/100/);
+  assert.equal(await page.locator('.night-score').getAttribute('aria-valuenow'),'96');
+  assert.equal(await page.locator('.night-score svg circle').count(),2);
   await page.getByLabel('Objetivo de sueño').selectOption('9');
+  assert.equal(await page.locator('.night-score').getAttribute('aria-valuenow'),'89');
   assert.match(await page.locator('.night-score').textContent(),/89/);
   await page.getByLabel('Objetivo de sueño').selectOption('8');
   assert.match(await page.locator('.sleep-model').textContent(),/0\/40/);
@@ -153,23 +162,26 @@ export const supabase = {
   assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('asclepio_sleep_test-user')).fields.includes('ruido')),true);
   assert.equal(await page.evaluate(()=>window.db.activity_logs[0].data.duracion_h),7.5);
   await page.locator('button[data-tab="ranking"]').click();
-  const ranking=await page.evaluate(async()=> (await import('/js/activity.js?v=26')).getRanking('2000-01-01'));
+  const ranking=await page.evaluate(async()=> (await import('/js/activity.js?v=27')).getRanking('2000-01-01'));
   assert.equal(ranking[0].points_total,1100);
+  const pointReads=await page.evaluate(()=>window.reads.filter(t=>t==='daily_points').length);
+  await page.locator('[data-rank-mode="total"]').click();
+  assert.equal(await page.evaluate(()=>window.reads.filter(t=>t==='daily_points').length),pointReads,'Cambiar modo reutiliza puntos');
   for(const tab of ['hoy','habitos','sueno','ranking','datos']){
    await page.locator('button[data-tab="'+tab+'"]').click();
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=390),true,tab+' sin desbordamiento');
   }
   const metrics=await page.evaluate(async()=>{
-   const m=await import('/js/sleep.js?v=26');
+   const m=await import('/js/sleep.js?v=27');
    return [m.sleepMetrics({horaDormir:'23:30',horaDespertar:'07:00',despierto_min:30}),m.sleepMetrics({horaDormir:'07:00',horaDespertar:'07:00'}),m.sleepScore([],420)];
   });
   assert.equal(metrics[0].dur,420);assert.equal(metrics[1].dur,null);assert.equal(metrics[2],null);
-  const invalid=await page.evaluate(async()=> (await import('/js/health.js?v=26')).suggestGoals({sex:'hombre',height_cm:175,birth_year:2020,training_days:3},75));
+  const invalid=await page.evaluate(async()=> (await import('/js/health.js?v=27')).suggestGoals({sex:'hombre',height_cm:175,birth_year:2020,training_days:3},75));
   assert.equal(invalid,null);
   // Límites del cálculo y sueño cruzando medianoche, sin datos suficientes.
   const boundary=await page.evaluate(async()=>{
-   const {suggestGoals}=await import('/js/health.js?v=26');
-   const {sleepMetrics,sleepScore}=await import('/js/sleep.js?v=26');
+   const {suggestGoals}=await import('/js/health.js?v=27');
+   const {sleepMetrics,sleepScore}=await import('/js/sleep.js?v=27');
    const s=suggestGoals({sex:'hombre',height_cm:175.5,birth_year:2001,training_days:0,pace_kg_week:-0.75},74.5,2026);
    return {floor:s.goals.goal_kcal>=10*74.5+6.25*175.5-5*25+5,
     awake:sleepMetrics({horaDormir:'23:00',horaDespertar:'07:00',despierto_min:480}).dur,

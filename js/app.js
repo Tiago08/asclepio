@@ -1,28 +1,28 @@
-import { nightScore, personalModel, journalPatterns, sleepPreferences, storeSleepPreferences, wireSleepJournal, validateSleepJournal } from './sleepPersonal.js?v=26';
-import { sleepMetrics, sleepReference, sleepScore } from './sleep.js?v=26';
-import { supabase } from './supabaseClient.js?v=26';
+import { nightScore, personalModel, journalPatterns, sleepPreferences, storeSleepPreferences, wireSleepJournal, validateSleepJournal } from './sleepPersonal.js?v=27';
+import { sleepMetrics, sleepReference, sleepScore } from './sleep.js?v=27';
+import { supabase } from './supabaseClient.js?v=27';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js?v=26';
+} from './auth.js?v=27';
 import {
   NUTRIENT_FIELDS, MICRO_FIELDS, searchUsda, searchLocalFoods, searchFavorites, updateFood,
   cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, moveFoodLog, restoreFoodLog, copyFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel, pluralEs
-} from './foods.js?v=26';
+} from './foods.js?v=27';
 import {
-  logActivity, updateActivityLog, restoreActivityLog, deleteActivityLog, getEntriesForDate, getEntriesInRange, getRanking
-} from './activity.js?v=26';
-import { buildReportText, downloadText } from './report.js?v=26';
-import { BASICS, searchBasics } from './basics.js?v=26';
-import { normalizeText } from './foodDict.js?v=26';
+  logActivity, updateActivityLog, restoreActivityLog, deleteActivityLog, getEntriesInRange, getRanking, getRecentEntries, invalidateRecentEntries
+} from './activity.js?v=27';
+import { buildReportText, downloadText } from './report.js?v=27';
+import { BASICS, searchBasics } from './basics.js?v=27';
+import { normalizeText } from './foodDict.js?v=27';
 import {
   getGoalHistory, saveGoalsFrom, goalsForDate, getBodyProfile, saveBodyProfile, suggestGoals, PACES, paceOf, objectiveOf,
   getWeights, saveWeight, deleteWeight, getSupplements, addSupplement, retireSupplement,
   getSupplementLogs, getSupplementLogsInRange, setSupplementTaken, getWaterLogs, addWater, deleteWater,
   electrolyteTotals, getCombos, createCombo, deleteCombo
-} from './health.js?v=26';
-import { HABIT_MOMENTS, getHabits, addHabit, updateHabit, archiveHabit, getHabitLogs, setHabitDone } from './habits.js?v=26';
-import { microTargets, microTotals, microStatus } from './micros.js?v=26';
+} from './health.js?v=27';
+import { HABIT_MOMENTS, getHabits, addHabit, updateHabit, archiveHabit, getHabitLogs, setHabitDone } from './habits.js?v=27';
+import { microTargets, microTotals, microStatus } from './micros.js?v=27';
 
 /* ================= actualización automática ================= */
 /* GitHub Pages deja guardar index.html hasta 10 min y la app instalada en el
@@ -553,6 +553,7 @@ async function handleSession(s){
     tabBar.classList.remove('hidden');
     await bootApp();
   }else{
+    invalidateRecentEntries();
     user = null; profile = null; bootedFor = null;
     closeForm();
     bootScreen.classList.add('hidden');
@@ -610,21 +611,26 @@ async function bootApp(){
   paintTodayDate();
   renderLogActions();
   try{
-    await ensureProfile(user);
-    profile = await getMyProfile(user.id);
+    await Promise.all([(async () => {
+      try{ profile = await getMyProfile(user.id); }
+      catch(err){
+        if(err.code !== 'PGRST116') throw err;
+        await ensureProfile(user);
+        profile = await getMyProfile(user.id);
+      }
+    })(), loadPhase2Data()]);
   }catch(err){
     showError('Error cargando perfil: ' + (err.message || err));
     return;
   }
   document.getElementById('displayNameInput').value = profile.display_name;
   document.getElementById('accountSummary').textContent = profile.display_name;
-  await loadPhase2Data();
   fillGoalInputs();
   fillBodyInputs();
   // la calculadora solo se abre sola si todavía no has puesto tus datos
   document.getElementById('calcGoals').open = !bodyProfile;
   renderWeights();
-  await Promise.all([renderFavorites(), renderToday(), renderStats(), renderRanking()]);
+  await Promise.all([renderFavorites(), renderToday(), renderStats()]);
   renderHistoryPlaceholder();
 }
 
@@ -1719,7 +1725,9 @@ async function renderToday(){
   const wrap = document.getElementById('todayTimeline');
   wrap.innerHTML = `<div class="search-empty"><span class="spinner"></span> cargando...</div>`;
   try{
-    const list = await getEntriesForDate(user.id, viewDate);
+    const date = viewDate;
+    const list = (await getRecentEntries(user.id, daysAgoStr(13), todayStr())).filter(e => e.date === date);
+    if(viewDate !== date) return;
     todayEntries = list;
     const others = list.filter(e => e.kind !== 'food');
     wrap.innerHTML = others.length
@@ -2440,7 +2448,7 @@ async function renderSleep(){
   if(last){
     const { dur } = calcSleep(last.data);
     const latency = last.data.intentoDormir ? minsBetween(last.data.intentoDormir,last.data.horaDormir) : null;
-    top = `${nightly ? `<div class="night-score"><b>${nightly.total}</b><span>/100 · Anoche</span></div><p class="sl-foot">Duración ${nightly.duration}/60 · Continuidad ${nightly.continuity}/20 · Calidad ${nightly.quality}/20</p>` : '<p>Completa horas y calidad para ver el puntaje.</p>'}<div class="sl-big mono">${dur != null ? fmtDur(dur) : '—'}</div>
+    top = `${nightly ? `<div class="night-score" role="meter" aria-label="Puntaje de sueño de anoche" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${nightly.total}" style="--score:${nightly.total}"><svg viewBox="0 0 200 200" aria-hidden="true"><circle class="score-track" cx="100" cy="100" r="88"/><circle class="score-progress" cx="100" cy="100" r="88" pathLength="100"/></svg><div class="score-center"><b>${nightly.total}</b><span>/100 · Anoche</span></div></div><p class="sl-foot">Duración ${nightly.duration}/60 · Continuidad ${nightly.continuity}/20 · Calidad ${nightly.quality}/20</p>` : '<p>Completa horas y calidad para ver el puntaje.</p>'}<div class="sl-big mono">${dur != null ? fmtDur(dur) : '—'}</div>
       <div class="sl-sub">${escapeHtml(last.data.horaDormir || '?')} → ${escapeHtml(last.data.horaDespertar || '?')}${last.data.calidad ? ` · calidad ${last.data.calidad}/5` : ''}</div>
       <div class="night-details"><span>Despierto: ${last.data.despierto_min!=='' && last.data.despierto_min!=null ? escapeHtml(last.data.despierto_min)+' min' : 'sin registrar (se asume 0)'}</span><span>Para dormirte: ${latency!=null && latency<=360 ? latency+' min aprox.' : 'sin registrar'}</span>${last.data.descanso?`<span>Descanso al despertar: ${escapeHtml(last.data.descanso)}/5</span>`:''}</div>
       <button class="btn-link" type="button" data-sleep-edit>Editar noche y diario</button>`;
@@ -2524,7 +2532,7 @@ async function renderSleep(){
     const saved = storeSleepPreferences(user.id,prefs);
     wrap.querySelector('#sleepPlan').textContent = `Intenta dormir a las ${pad(Math.floor(bedtime/60))}:${pad(bedtime%60)} para levantarte a las ${wake}. Margen de ${allowance} min ${gaps.length>=3?'según tus registros':'inicial para conciliar el sueño y despertares'}.${saved?'':' No se pudo recordar tu configuración en este dispositivo.'}`;
     const current = last ? nightScore(last.data,hours*60) : null;
-    if(current){ wrap.querySelector('.night-score b').textContent=current.total; wrap.querySelector('.sl-top .sl-foot').textContent=`Duración ${current.duration}/60 · Continuidad ${current.continuity}/20 · Calidad ${current.quality}/20`; }
+    if(current){ const ring=wrap.querySelector('.night-score'); ring.querySelector('b').textContent=current.total; ring.style.setProperty('--score',current.total); ring.setAttribute('aria-valuenow',current.total); wrap.querySelector('.sl-top .sl-foot').textContent=`Duración ${current.duration}/60 · Continuidad ${current.continuity}/20 · Calidad ${current.quality}/20`; }
   };
   wrap.querySelector('#sleepWake').addEventListener('change',updatePlan);
   wrap.querySelector('#sleepHours').addEventListener('change',updatePlan);
@@ -2774,11 +2782,11 @@ function weekStartStr(){
   return daysAgoStr(dow);
 }
 
-async function renderRanking(){
+async function renderRanking(cachedRows = null){
   const wrap = document.getElementById('rankingList');
   wrap.innerHTML = `<div class="search-empty"><span class="spinner"></span> cargando...</div>`;
   try{
-    const rows = await getRanking(weekStartStr());
+    const rows = cachedRows || await getRanking(weekStartStr());
     if(rows.length === 0){ wrap.innerHTML = `<div class="empty-state">Nadie ha registrado nada todavía.</div>`; return; }
     const hasPoints = rows.some(r => r.points_week != null);
     const key = rankingMode === 'week' ? 'points_week' : 'points_total';
@@ -2817,7 +2825,7 @@ async function renderRanking(){
     wrap.innerHTML = modes + list + info;
     wrap.querySelectorAll('[data-rank-mode]').forEach(b => b.addEventListener('click', () => {
       rankingMode = b.dataset.rankMode;
-      renderRanking();
+      renderRanking(rows);
     }));
   }catch(err){
     wrap.innerHTML = `<div class="empty-state">Error: ${escapeHtml(err.message)}</div>`;
@@ -2868,7 +2876,7 @@ function renderRings(foodEntries){
 
 async function renderStats(){
   try{
-    const list = await getEntriesInRange(user.id, daysAgoStr(13), todayStr());
+    const list = await getRecentEntries(user.id, daysAgoStr(13), todayStr());
     recentEntries = list;
     renderMeals(todayFoods);   // ya se sabe qué comiste ayer: aparece "Repetir ayer"
     await renderInsight(list);
@@ -2949,9 +2957,10 @@ document.addEventListener('visibilitychange', async () => {
 });
 
 async function refreshAfterLog(){
-  try{ profile = await getMyProfile(user.id); }catch(err){}
+  invalidateRecentEntries();
   await reloadDailyIfNewDay();
-  await Promise.all([renderToday(), renderStats(), renderFavorites()]);
+  await Promise.all([renderToday(), renderStats(), renderFavorites(),
+    getMyProfile(user.id).then(p => { profile = p; }).catch(() => {})]);
 }
 
 /* ================= perfil / metas ================= */
