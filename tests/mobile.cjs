@@ -39,7 +39,7 @@ export const supabase = {
    if(url.includes('/js/supabaseClient.js')) return route.fulfill({contentType:'text/javascript',body:mock});
    if(url.includes('/js/app.js')) {
     const source=fs.readFileSync(path.join(__dirname,'../js/app.js'),'utf8');
-    return route.fulfill({contentType:'text/javascript',body:source+'\nwindow.testApp={openQuantityStep,openQuickAddForm,openNewFoodForm,openActivityForm,openWaterForm,showPanel,renderSleep,foodDecimal};'});
+    return route.fulfill({contentType:'text/javascript',body:source+'\nwindow.testApp={openQuantityStep,openQuickAddForm,openNewFoodForm,openActivityForm,openWaterForm,showPanel,renderSleep,renderRings,renderInsight,foodDecimal};'});
    }
    if(!url.startsWith('http://127.0.0.1:8765')) return route.fulfill({contentType:url.includes('fonts')?'text/css':'text/javascript',body:''});
    return route.continue();
@@ -51,8 +51,59 @@ export const supabase = {
   assert.equal(await page.evaluate(()=>window.reads.filter(t=>t==='daily_points').length),0,'Ranking no se carga al arrancar');
   assert.equal(await page.evaluate(()=>window.reads.filter(t=>t==='profiles').length),1,'Una sola lectura de perfil existente');
   console.log('Arranque: 1 lectura de actividades para Hoy + estadísticas; 0 lecturas de puntos.');
+  assert.match(await page.locator('.kh-remaining').textContent(),/2[.\s]?000kcal restantes/);
+  assert.equal(await page.locator('[aria-current="page"]').getAttribute('data-tab'),'hoy');
+  assert.equal(await page.locator('#logoutBtn').isVisible(),false,'Cerrar sesión pertenece a Datos');
+  for(const selector of ['#dayPrev','.meal-add']){
+   const box=await page.locator(selector).first().boundingBox();
+   assert.ok(box.width>=44 && box.height>=44,selector+' admite un toque de 44 px');
+  }
+  if(process.env.SCREENSHOT_DIR) await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR,'hoy.png'),fullPage:true});
+  await page.evaluate(()=>window.testApp.renderRings([{data:{kcal:2400,protein_g:160,carbs_g:200,fat_g:70}}]));
+  assert.match(await page.locator('.kh-remaining').textContent(),/400sobre la meta/);
+  assert.equal(await page.getByRole('meter').getAttribute('aria-valuenow'),'2000');
+  assert.match(await page.locator('.macro-remaining').nth(1).textContent(),/10 g sobre la meta/);
+  await page.evaluate(()=>window.testApp.renderRings([]));
+  const patterns=await page.evaluate(async()=>{
+   const day=n=>{const d=new Date();d.setDate(d.getDate()-n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+   const entries=[];
+   for(let i=0;i<6;i++){
+    entries.push({date:day(i),type:'gym',data:{fue:i<3}});
+    entries.push({date:day(i),type:'energia',data:{nivel:i===0?5:1}});
+   }
+   for(let i=0;i<3;i++)entries.push({date:day(0),type:'energia',data:{nivel:5}});
+   await window.testApp.renderInsight(entries);
+   const paired=document.querySelector('#insightArea').textContent;
+   await window.testApp.renderInsight(entries.filter(e=>e.type!=='gym'||e.data.fue));
+   const unknown=document.querySelector('#insightArea').textContent;
+   await window.testApp.renderInsight(entries.filter(e=>e.type!=='energia'||e.date===day(0)||e.date===day(3)));
+   const insufficient=document.querySelector('#insightArea').textContent;
+   await window.testApp.renderInsight(entries.map(e=>({...e,date:day(-1)})));
+   return {paired,unknown,insufficient,future:document.querySelector('#insightArea').textContent};
+  });
+  assert.match(patterns.paired,/2.3\/5/,'Promedio por día, no por número de registros');
+  assert.match(patterns.paired,/3 días de gym · 3 de descanso/);
+  assert.equal(patterns.unknown,'','No registrar gym no equivale a descanso');
+  assert.equal(patterns.insufficient,'','La muestra mínima requiere días con ambas mediciones');
+  assert.equal(patterns.future,'','No se usan datos posteriores al día seleccionado');
+  await page.locator('#dayPrev').click();
+  await page.waitForFunction(()=>document.querySelector('.kh-label').textContent==='Balance del día');
+  await page.locator('#dayNext').click();
+  await page.waitForFunction(()=>document.querySelector('.kh-label').textContent==='Tu balance de hoy');
+  const breakfastAdd=page.getByRole('button',{name:'Agregar a Desayuno',exact:true});
+  await breakfastAdd.tap();
+  await page.waitForSelector('#sheet:not(.hidden)');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('#sheet.hidden',{state:'attached'});
+  assert.equal(await breakfastAdd.evaluate(el=>el===document.activeElement),true,'Cerrar devuelve el foco al disparador');
   const food={id:'food-1',name:'Alimento prueba',source:'custom',serving_label:'100 g',serving_grams:100,kcal:200,protein_g:10,carbs_g:20,fat_g:4};
   await page.evaluate(f=>window.testApp.openQuantityStep(f),food);
+  assert.equal(await page.locator('#appShell').evaluate(el=>el.inert),true);
+  await page.locator('#sheetGrip').focus();
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(await page.locator('#sheet').evaluate(el=>el.contains(document.activeElement)),true);
+  await page.keyboard.press('Tab');
+  assert.equal(await page.locator('#sheetGrip').evaluate(el=>el===document.activeElement),true);
   await page.locator('#f_qty').fill('1');
   await page.locator('#f_qty').press('End');
   await page.locator('#f_qty').pressSequentially(',5');
@@ -89,6 +140,9 @@ export const supabase = {
   assert.equal(await page.evaluate(()=>window.db.foods[0].serving_grams),80.5);
   await page.keyboard.press('Escape');
   await page.locator('button[data-tab="datos"]').click();
+  assert.equal(await page.locator('#appShell').evaluate(el=>el.inert),false);
+  assert.equal(await page.locator('[aria-current="page"]').getAttribute('data-tab'),'datos');
+  assert.equal(await page.locator('#logoutBtn').isVisible(),true);
   // Primer uso: el cálculo se abre, con un solo paso visible.
   assert.equal(await page.locator('[data-objective-step]:visible').count(),1);
   assert.equal(await page.locator('#goalKcal').isVisible(),false);
@@ -162,7 +216,7 @@ export const supabase = {
   assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('asclepio_sleep_test-user')).fields.includes('ruido')),true);
   assert.equal(await page.evaluate(()=>window.db.activity_logs[0].data.duracion_h),7.5);
   await page.locator('button[data-tab="ranking"]').click();
-  const ranking=await page.evaluate(async()=> (await import('/js/activity.js?v=27')).getRanking('2000-01-01'));
+  const ranking=await page.evaluate(async()=> (await import('/js/activity.js?v=28')).getRanking('2000-01-01'));
   assert.equal(ranking[0].points_total,1100);
   const pointReads=await page.evaluate(()=>window.reads.filter(t=>t==='daily_points').length);
   await page.locator('[data-rank-mode="total"]').click();
@@ -172,16 +226,16 @@ export const supabase = {
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=390),true,tab+' sin desbordamiento');
   }
   const metrics=await page.evaluate(async()=>{
-   const m=await import('/js/sleep.js?v=27');
+   const m=await import('/js/sleep.js?v=28');
    return [m.sleepMetrics({horaDormir:'23:30',horaDespertar:'07:00',despierto_min:30}),m.sleepMetrics({horaDormir:'07:00',horaDespertar:'07:00'}),m.sleepScore([],420)];
   });
   assert.equal(metrics[0].dur,420);assert.equal(metrics[1].dur,null);assert.equal(metrics[2],null);
-  const invalid=await page.evaluate(async()=> (await import('/js/health.js?v=27')).suggestGoals({sex:'hombre',height_cm:175,birth_year:2020,training_days:3},75));
+  const invalid=await page.evaluate(async()=> (await import('/js/health.js?v=28')).suggestGoals({sex:'hombre',height_cm:175,birth_year:2020,training_days:3},75));
   assert.equal(invalid,null);
   // Límites del cálculo y sueño cruzando medianoche, sin datos suficientes.
   const boundary=await page.evaluate(async()=>{
-   const {suggestGoals}=await import('/js/health.js?v=27');
-   const {sleepMetrics,sleepScore}=await import('/js/sleep.js?v=27');
+   const {suggestGoals}=await import('/js/health.js?v=28');
+   const {sleepMetrics,sleepScore}=await import('/js/sleep.js?v=28');
    const s=suggestGoals({sex:'hombre',height_cm:175.5,birth_year:2001,training_days:0,pace_kg_week:-0.75},74.5,2026);
    return {floor:s.goals.goal_kcal>=10*74.5+6.25*175.5-5*25+5,
     awake:sleepMetrics({horaDormir:'23:00',horaDespertar:'07:00',despierto_min:480}).dur,

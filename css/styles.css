@@ -5,7 +5,7 @@
   --surface-sunken: #191c22;
   --text: #eceae4;
   --text-dim: #9aa2ae;
-  --text-faint: #5c6472;
+  --text-faint: #929caa;
   --accent: #4fbdae;
   --danger: #d9705f;
 
@@ -134,10 +134,15 @@ header{
   padding: 20px 20px 18px;
   margin: 14px 0 18px;
 }
-.kh-top{ display:flex; align-items:baseline; justify-content:space-between; margin-bottom: 10px; }
+.kh-top{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom: 18px; }
 .kh-label{ font-size: 13px; color: var(--text-dim); }
-.kh-num{ font-size: 15px; color: var(--text-dim); }
-.kh-num b{ font-family:'IBM Plex Mono', monospace; font-size: 26px; color: var(--text); font-weight: 600; }
+.kh-num{ display:flex; flex-direction:column; font-size: 11px; color: var(--text-dim); margin-top:6px; }
+.kh-num b{ font-family:'IBM Plex Mono', monospace; font-size: 36px; line-height:1.2; letter-spacing:-1.5px; color: var(--text); font-weight: 500; }
+.kh-remaining{ display:flex; flex-direction:column; align-items:flex-end; color:var(--accent); }
+.kh-remaining b{ font-family:'IBM Plex Mono', monospace; font-size:24px; font-weight:500; }
+.kh-remaining span{ font-size:11px; }
+.kh-budget{ display:flex; justify-content:space-between; font-size:11px; color:var(--text-dim); margin-bottom:8px; }
+.macro-remaining{ display:block; font-size:10px; color:var(--text-dim); margin-top:8px; }
 .kh-bar{ height: 8px; border-radius: 99px; background: var(--surface-sunken); overflow: hidden; margin-bottom: 18px; }
 .kh-bar-fill{ height: 100%; border-radius: 99px; background: var(--c-energia); transition: width 300ms ease; }
 
@@ -201,7 +206,7 @@ header{
   color: var(--text-faint); font-size: 11px; border-radius: var(--r-sm);
 }
 .tab-btn .tab-ic{ font-size: 18px; line-height: 1; }
-.tab-btn.active{ color: var(--accent); }
+.tab-btn.active{ color: var(--accent); background:color-mix(in srgb, var(--accent) 12%, transparent); }
 .panel{ display: none; }
 .panel.active{ display: block; }
 
@@ -540,7 +545,7 @@ header{
 .meal.is-empty .meal-name{ color: var(--text-dim); font-weight: 400; }
 .meal-kcal{ font-size: 13px; color: var(--text-dim); }
 .meal-add{
-  width: 40px; height: 40px; flex: none; border-radius: 50%; border: none;
+  width: 44px; height: 44px; flex: none; border-radius: 50%; border: none;
   background: color-mix(in srgb, var(--c-comida) 18%, transparent); color: var(--c-comida);
   font-size: 22px; line-height: 1; display: flex; align-items: center; justify-content: center;
 }
@@ -686,7 +691,7 @@ header{
 .day-nav{ display: flex; align-items: center; gap: 2px; }
 .day-arrow{
   background: none; border: none; color: var(--text-dim); font-size: 20px; line-height: 1;
-  width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; padding: 0 0 2px;
+  width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; padding: 0 0 2px;
 }
 .day-arrow:active{ background: var(--surface); }
 .day-arrow:disabled{ opacity: 0.25; }
@@ -890,3 +895,25 @@ header{
 .night-score b{ line-height:1; }
 @media (prefers-reduced-motion:reduce){ .score-progress{ transition:none; } }
 button:focus-visible, summary:focus-visible{ outline: 2px solid var(--accent); outline-offset: 3px; }
+
+/* Jerarquía del diario y controles cómodos para el pulgar. */
+.today-card{ background:radial-gradient(ellipse at top right, rgba(79,189,174,.09), transparent 75%), var(--surface); }
+.header-right{ gap:0; }
+.wordmark{ font-size:17px; letter-spacing:.04em; }
+.tab-btn{ min-height:48px; color:var(--text-dim); transition:background 160ms ease, color 160ms ease; }
+.section-title{ letter-spacing:.02em; }
+.meal-h{ flex-wrap:wrap; gap:8px; }
+.meal-name{ min-width:90px; }
+.meal-repeat{ min-height:44px; }
+.mi-main{ min-height:44px; }
+.login-field-label{ display:block; color:var(--text-dim); font-size:13px; margin-bottom:8px; }
+.account-logout{ width:100%; min-height:48px; margin:12px 0 20px; color:var(--text-dim); }
+.insight-label{ display:block; font-size:11px; font-weight:500; color:var(--accent); margin-bottom:8px; }
+.insight-card small{ display:block; font-size:11px; line-height:1.6; margin-top:10px; color:var(--text-dim); }
+@media (max-width:359px){
+  .shell{ padding-left:16px; padding-right:16px; }
+  .wordmark{ font-size:14px; }
+  .today-date{ font-size:11px; }
+  .today-card{ padding:18px 14px; }
+  .macro-row{ gap:8px; }
+}

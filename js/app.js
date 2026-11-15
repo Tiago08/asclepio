@@ -1,28 +1,28 @@
-import { nightScore, personalModel, journalPatterns, sleepPreferences, storeSleepPreferences, wireSleepJournal, validateSleepJournal } from './sleepPersonal.js?v=27';
-import { sleepMetrics, sleepReference, sleepScore } from './sleep.js?v=27';
-import { supabase } from './supabaseClient.js?v=27';
+import { nightScore, personalModel, journalPatterns, sleepPreferences, storeSleepPreferences, wireSleepJournal, validateSleepJournal } from './sleepPersonal.js?v=28';
+import { sleepMetrics, sleepReference, sleepScore } from './sleep.js?v=28';
+import { supabase } from './supabaseClient.js?v=28';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js?v=27';
+} from './auth.js?v=28';
 import {
   NUTRIENT_FIELDS, MICRO_FIELDS, searchUsda, searchLocalFoods, searchFavorites, updateFood,
   cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, moveFoodLog, restoreFoodLog, copyFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel, pluralEs
-} from './foods.js?v=27';
+} from './foods.js?v=28';
 import {
   logActivity, updateActivityLog, restoreActivityLog, deleteActivityLog, getEntriesInRange, getRanking, getRecentEntries, invalidateRecentEntries
-} from './activity.js?v=27';
-import { buildReportText, downloadText } from './report.js?v=27';
-import { BASICS, searchBasics } from './basics.js?v=27';
-import { normalizeText } from './foodDict.js?v=27';
+} from './activity.js?v=28';
+import { buildReportText, downloadText } from './report.js?v=28';
+import { BASICS, searchBasics } from './basics.js?v=28';
+import { normalizeText } from './foodDict.js?v=28';
 import {
   getGoalHistory, saveGoalsFrom, goalsForDate, getBodyProfile, saveBodyProfile, suggestGoals, PACES, paceOf, objectiveOf,
   getWeights, saveWeight, deleteWeight, getSupplements, addSupplement, retireSupplement,
   getSupplementLogs, getSupplementLogsInRange, setSupplementTaken, getWaterLogs, addWater, deleteWater,
   electrolyteTotals, getCombos, createCombo, deleteCombo
-} from './health.js?v=27';
-import { HABIT_MOMENTS, getHabits, addHabit, updateHabit, archiveHabit, getHabitLogs, setHabitDone } from './habits.js?v=27';
-import { microTargets, microTotals, microStatus } from './micros.js?v=27';
+} from './health.js?v=28';
+import { HABIT_MOMENTS, getHabits, addHabit, updateHabit, archiveHabit, getHabitLogs, setHabitDone } from './habits.js?v=28';
+import { microTargets, microTotals, microStatus } from './micros.js?v=28';
 
 /* ================= actualización automática ================= */
 /* GitHub Pages deja guardar index.html hasta 10 min y la app instalada en el
@@ -391,26 +391,41 @@ if(window.visualViewport){
   syncViewport();
 }
 
+let sheetReturnFocus = null;
+let sheetDismissTimer = null;
 function openSheet(){
+  clearTimeout(sheetDismissTimer);
+  if(sheet.classList.contains('hidden')) sheetReturnFocus = document.activeElement;
+  sheet.style.transform = sheet.style.transition = '';
+  sheetBackdrop.style.opacity = sheetBackdrop.style.transition = '';
   sheet.classList.remove('tall');
   sheet.classList.remove('hidden');
   sheetBackdrop.classList.remove('hidden');
   document.body.classList.add('sheet-open');
+  document.getElementById('appShell').inert = true;
+  document.getElementById('tabBar').inert = true;
   sheet.scrollTop = 0;
+  document.getElementById('sheetGrip').focus({ preventScroll: true });
 }
 function resetForm(){
   formArea.innerHTML = '';
   openSheet();
 }
 function closeForm(){
+  clearTimeout(sheetDismissTimer);
   formArea.innerHTML = '';
   pendingMomento = null;
   sheet.classList.remove('tall');
   sheet.classList.add('hidden');
   sheetBackdrop.classList.add('hidden');
   document.body.classList.remove('sheet-open');
+  document.getElementById('appShell').inert = false;
+  document.getElementById('tabBar').inert = false;
   sheet.style.transform = sheet.style.transition = '';
   sheetBackdrop.style.opacity = sheetBackdrop.style.transition = '';
+  const target = sheetReturnFocus?.isConnected ? sheetReturnFocus : document.querySelector('.tab-btn.active');
+  target?.focus({ preventScroll: true });
+  sheetReturnFocus = null;
 }
 
 /** Cierra la hoja deslizándola hacia abajo (para el gesto, el fondo, la barrita y Esc). */
@@ -421,11 +436,21 @@ function dismissSheet(){
   sheet.style.transform = `translateY(${sheet.offsetHeight + 40}px)`;
   sheetBackdrop.style.transition = 'opacity 220ms ease';
   sheetBackdrop.style.opacity = '0';
-  setTimeout(closeForm, 220);
+  clearTimeout(sheetDismissTimer);
+  sheetDismissTimer = setTimeout(closeForm, 220);
 }
 sheetBackdrop.addEventListener('click', dismissSheet);
 document.getElementById('sheetGrip').addEventListener('click', dismissSheet);
-document.addEventListener('keydown', e => { if(e.key === 'Escape') dismissSheet(); });
+document.addEventListener('keydown', e => {
+  if(sheet.classList.contains('hidden')) return;
+  if(e.key === 'Escape') dismissSheet();
+  if(e.key !== 'Tab') return;
+  const controls = [...sheet.querySelectorAll('button, input, select, textarea, a[href], summary, [tabindex="0"]')]
+    .filter(el => !el.disabled && el.getClientRects().length);
+  const first = controls[0], last = controls.at(-1);
+  if(e.shiftKey && document.activeElement === first){ e.preventDefault(); last?.focus(); }
+  else if(!e.shiftKey && document.activeElement === last){ e.preventDefault(); first?.focus(); }
+});
 
 /* Deslizar hacia abajo para cerrar, como las hojas de iOS. Se arrastra desde
    la barrita de arriba, o desde cualquier parte si la hoja ya está arriba del
@@ -596,6 +621,7 @@ async function setViewDate(d){
   if(d === viewDate) return;
   viewDate = d;
   paintTodayDate();
+  renderInsight(recentEntries);
   try{
     [waterToday, takenToday] = await Promise.all([getWaterLogs(user.id, d), getSupplementLogs(user.id, d)]);
   }catch(err){ waterToday = []; takenToday = new Set(); }
@@ -1668,7 +1694,12 @@ function openNewFoodForm(){
 /** Muestra un panel. `tab` es el botón de la barra que queda encendido
     (Historial no tiene botón propio: se abre desde Datos y deja Datos encendido). */
 function showPanel(panel, tab = panel){
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    const active = b.dataset.tab === tab;
+    b.classList.toggle('active', active);
+    if(active) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
+  });
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + panel));
   document.body.dataset.tab = panel;
   paintTodayDate();
@@ -2858,15 +2889,18 @@ function renderRings(foodEntries){
   ringRow.innerHTML = `
     <div class="today-card">
       <div class="kh-top">
-        <span class="kh-label">Calorías</span>
-        <span class="kh-num"><b>${Math.round(totals.kcal)}</b> / ${Math.round(g.goal_kcal)} · ${over ? `<span class="kh-over">${-diff} de más</span>` : `${diff} restantes`}</span>
+        <div><span class="kh-label">${isViewingToday() ? 'Tu balance de hoy' : 'Balance del día'}</span>
+          <div class="kh-num"><b>${Math.round(totals.kcal).toLocaleString('es')}</b><span>kcal registradas</span></div></div>
+        <div class="kh-remaining${over ? ' kh-over' : ''}"><b>${Math.abs(diff).toLocaleString('es')}</b><span>${over ? 'sobre la meta' : 'kcal restantes'}</span></div>
       </div>
-      <div class="kh-bar"><div class="kh-bar-fill${over ? ' is-over' : ''}" style="width:${pctWidth(totals.kcal, g.goal_kcal)}"></div></div>
+      <div class="kh-budget"><span>Meta diaria</span><span>${Math.round(g.goal_kcal).toLocaleString('es')} kcal</span></div>
+      <div class="kh-bar" role="meter" aria-label="Calorías registradas" aria-valuemin="0" aria-valuemax="${g.goal_kcal}" aria-valuenow="${Math.min(totals.kcal, g.goal_kcal)}" aria-valuetext="${Math.round(totals.kcal)} de ${Math.round(g.goal_kcal)} kcal"><div class="kh-bar-fill${over ? ' is-over' : ''}" style="width:${pctWidth(totals.kcal, g.goal_kcal)}"></div></div>
       <div class="macro-row">
         ${macros.map(m => `
           <div class="macro-item">
             <div class="macro-top"><span>${m.label}</span><span><b>${Math.round(totals[m.key])}</b><span class="goal"> / ${Math.round(m.goal)}g</span></span></div>
             <div class="macro-bar"><div class="macro-bar-fill" style="width:${pctWidth(totals[m.key], m.goal)}; background:${m.color};"></div></div>
+            <span class="macro-remaining">${Math.abs(Math.round(m.goal) - Math.round(totals[m.key]))} g ${totals[m.key] > m.goal ? 'sobre la meta' : 'restantes'}</span>
           </div>`).join('')}
       </div>
     </div>`;
@@ -2885,12 +2919,14 @@ async function renderStats(){
 
 async function renderInsight(entries){
   const byDate = {};
-  entries.forEach(e => { (byDate[e.date] = byDate[e.date] || []).push(e); });
+  entries.filter(e => e.date <= viewDate && e.date >= addDays(viewDate, -13))
+    .forEach(e => { (byDate[e.date] = byDate[e.date] || []).push(e); });
 
-  const gymDays = new Set(), energiaByDate = {}, sleepHoursByDate = {};
+  const gymDays = new Set(), restDays = new Set(), energiaByDate = {}, sleepHoursByDate = {};
   Object.entries(byDate).forEach(([date, list]) => {
     list.forEach(e => {
       if(e.type === 'gym' && e.data.fue !== false) gymDays.add(date);
+      if(e.type === 'gym' && e.data.fue === false) restDays.add(date);
       if(e.type === 'energia' && e.data.nivel) {
         energiaByDate[date] = energiaByDate[date] || [];
         energiaByDate[date].push(Number(e.data.nivel));
@@ -2903,36 +2939,38 @@ async function renderInsight(entries){
   });
 
   const avgEnergiaOn = (dateSet) => {
-    const vals = [...dateSet].flatMap(d => energiaByDate[d] || []);
+    // Cada día pesa igual, aunque tenga varias mediciones de energía.
+    const vals = [...dateSet].filter(d => energiaByDate[d]?.length)
+      .map(d => energiaByDate[d].reduce((a,b)=>a+b,0) / energiaByDate[d].length);
     return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
   };
 
-  const allDates = Object.keys(byDate);
-  const nonGymDays = allDates.filter(d => !gymDays.has(d));
-  const eGym = avgEnergiaOn(gymDays);
+  const pairedGymDays = [...gymDays].filter(d => energiaByDate[d]);
+  const nonGymDays = [...restDays].filter(d => !gymDays.has(d) && energiaByDate[d]);
+  const eGym = avgEnergiaOn(pairedGymDays);
   const eNoGym = avgEnergiaOn(nonGymDays);
 
   let text = null;
-  if(gymDays.size >= 3 && nonGymDays.length >= 3 && eGym != null && eNoGym != null && Math.abs(eGym - eNoGym) >= 0.4){
-    text = eGym > eNoGym
-      ? `Tu energía promedio es <b>${eGym.toFixed(1)}/5</b> los días que vas al gym, vs <b>${eNoGym.toFixed(1)}/5</b> los días que no.`
-      : `Tu energía promedio es más baja (<b>${eGym.toFixed(1)}/5</b>) los días que vas al gym que los que no (<b>${eNoGym.toFixed(1)}/5</b>) — vale la pena ver si es por falta de recuperación.`;
+  let sample = '';
+  if(pairedGymDays.length >= 3 && nonGymDays.length >= 3 && eGym != null && eNoGym != null && Math.abs(eGym - eNoGym) >= 0.4){
+    text = `Tu energía promedio es <b>${eGym.toFixed(1)}/5</b> en días de gym y <b>${eNoGym.toFixed(1)}/5</b> en días de descanso registrado.`;
+    sample = `${pairedGymDays.length} días de gym · ${nonGymDays.length} de descanso`;
   } else {
     const pairs = Object.keys(sleepHoursByDate).filter(d => energiaByDate[d]);
     if(pairs.length >= 4){
       const highSleep = pairs.filter(d => sleepHoursByDate[d] >= 7);
       const lowSleep = pairs.filter(d => sleepHoursByDate[d] < 7);
       if(highSleep.length >= 2 && lowSleep.length >= 2){
-        const avg = (arr) => arr.flatMap(d => energiaByDate[d]).reduce((a,b)=>a+b,0) / arr.flatMap(d => energiaByDate[d]).length;
-        const eHigh = avg(highSleep), eLow = avg(lowSleep);
+        const eHigh = avgEnergiaOn(highSleep), eLow = avgEnergiaOn(lowSleep);
         if(Math.abs(eHigh - eLow) >= 0.4){
           text = `Los días que duermes 7h o más, tu energía promedio es <b>${eHigh.toFixed(1)}/5</b>, contra <b>${eLow.toFixed(1)}/5</b> cuando duermes menos.`;
+          sample = `${highSleep.length} noches de 7 h o más · ${lowSleep.length} de menos de 7 h`;
         }
       }
     }
   }
 
-  insightArea.innerHTML = text ? `<div class="insight-card">${text}</div>` : '';
+  insightArea.innerHTML = text ? `<div class="insight-card"><span class="insight-label">Patrón en tus registros</span>${text}<small>${sample}. Asociación observada; no indica causa. Últimos 14 días disponibles hasta el día seleccionado.</small></div>` : '';
 }
 
 // Si la app quedó abierta y pasó la medianoche, el agua y los suplementos son de otro día

@@ -1,3 +1,18 @@
+# Revisión UX/UI · versión 28
+
+Cambios del 14 de noviembre de 2026, limitados al frontend existente:
+
+- **Jerarquía de Hoy:** calorías registradas y restantes separadas, meta explícita, saldo de cada macro y superficie con acento suave. Se conservan las cuatro comidas, los mosaicos y los micronutrientes plegables.
+- **Legibilidad y tacto:** contraste reforzado de textos secundarios, botones de fecha y agregar comida de 44 × 44 px, filas de comida de al menos 44 px y pestaña activa con fondo además del color.
+- **Arquitectura de información:** cerrar sesión pasa a Datos, junto a la cuenta. La barra principal conserva sus cinco destinos; Historial sigue dependiendo de Datos.
+- **Accesibilidad:** etiquetas persistentes en el acceso, anuncios de estado, navegación con `aria-current` y calorías con semántica de medidor. La hoja bloquea la interacción del fondo, contiene el foco y lo devuelve al cerrar. Se cancela el cierre pendiente si se abre otra hoja.
+- **Insights:** la ausencia de gym ya no cuenta como descanso. Se requieren al menos tres días con gym y energía y tres con descanso explícito y energía; cada día pesa igual aunque tenga varias mediciones. Se muestra el tamaño de muestra y se explica que la asociación no indica causa. El período excluye datos posteriores al día seleccionado. Se conserva la comparación de sueño y energía con su mínimo de dos noches por grupo.
+- **Entrega:** caché de módulos y CSS en versión 28. Sin dependencias nuevas, servicios de IA, cambios de esquema ni migraciones que ejecutar.
+
+Validación: `node --check` en todos los módulos de `js/`; `tests/mobile.cjs` con servidor Python local y Chrome mediante Playwright a 390 × 844, Supabase simulado en memoria. Incluye saldo calórico por encima de meta, macros, tamaño táctil, navegación de fechas, foco modal, muestras incompletas y promedio diario de insights, además de los flujos existentes de guardado. Capturas revisadas de Hoy, Datos y diario de sueño. Sin errores de consola. La prueba no sustituye Safari en un iPhone físico ni verifica la base de producción.
+
+---
+
 # Revisión de Asclepio · versión 24
 
 Revisión del 14 de noviembre de 2026: código, navegación y guardado con Supabase simulado; permisos SQL en Postgres 16 local. No se inspeccionó ni modificó la base de producción.

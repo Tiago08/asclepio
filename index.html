@@ -15,24 +15,24 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/styles.css?v=27">
+<link rel="stylesheet" href="css/styles.css?v=28">
 <!-- Precarga en paralelo: sin esto el navegador descubre cada módulo
      solo después de bajar el anterior (una cascada en serie). -->
 <link rel="modulepreload" href="https://esm.sh/@supabase/supabase-js@2.119.0/es2022/supabase-js.bundle.mjs" crossorigin>
-<link rel="modulepreload" href="js/app.js?v=27">
-<link rel="modulepreload" href="js/supabaseClient.js?v=27">
-<link rel="modulepreload" href="js/config.js?v=27">
-<link rel="modulepreload" href="js/auth.js?v=27">
-<link rel="modulepreload" href="js/foods.js?v=27">
-<link rel="modulepreload" href="js/foodDict.js?v=27">
-<link rel="modulepreload" href="js/basics.js?v=27">
-<link rel="modulepreload" href="js/activity.js?v=27">
-<link rel="modulepreload" href="js/report.js?v=27">
-<link rel="modulepreload" href="js/health.js?v=27">
-<link rel="modulepreload" href="js/habits.js?v=27">
-<link rel="modulepreload" href="js/micros.js?v=27">
-<link rel="modulepreload" href="js/sleep.js?v=27">
-<link rel="modulepreload" href="js/sleepPersonal.js?v=27">
+<link rel="modulepreload" href="js/app.js?v=28">
+<link rel="modulepreload" href="js/supabaseClient.js?v=28">
+<link rel="modulepreload" href="js/config.js?v=28">
+<link rel="modulepreload" href="js/auth.js?v=28">
+<link rel="modulepreload" href="js/foods.js?v=28">
+<link rel="modulepreload" href="js/foodDict.js?v=28">
+<link rel="modulepreload" href="js/basics.js?v=28">
+<link rel="modulepreload" href="js/activity.js?v=28">
+<link rel="modulepreload" href="js/report.js?v=28">
+<link rel="modulepreload" href="js/health.js?v=28">
+<link rel="modulepreload" href="js/habits.js?v=28">
+<link rel="modulepreload" href="js/micros.js?v=28">
+<link rel="modulepreload" href="js/sleep.js?v=28">
+<link rel="modulepreload" href="js/sleepPersonal.js?v=28">
 </head>
 <body data-tab="hoy">
 
@@ -50,17 +50,19 @@
   <p class="login-sub" id="loginSub">Entra con tu correo. Te mandamos un código, sin contraseña.</p>
 
   <div id="loginStepEmail">
-    <input type="email" id="loginEmail" placeholder="tucorreo@ejemplo.com" autocomplete="email">
+    <label class="login-field-label" for="loginEmail">Correo electrónico</label>
+    <input type="email" id="loginEmail" placeholder="tucorreo@ejemplo.com" autocomplete="email" autocapitalize="none" spellcheck="false">
     <button class="btn-primary" id="loginBtn" style="width:100%; display:block;">Enviar código</button>
   </div>
 
   <div id="loginStepCode" class="hidden">
+    <label class="login-field-label" for="loginCode">Código de acceso</label>
     <input type="text" id="loginCode" placeholder="Código del correo" inputmode="numeric" autocomplete="one-time-code" maxlength="10">
     <button class="btn-primary" id="verifyBtn" style="width:100%; display:block;">Entrar</button>
     <button class="btn-link" id="backToEmailBtn" type="button">Usar otro correo</button>
   </div>
 
-  <div class="login-status" id="loginStatus"></div>
+  <div class="login-status" id="loginStatus" role="status" aria-live="polite"></div>
 </div>
 
 <!-- ============ APP ============ -->
@@ -74,7 +76,6 @@
           <span class="today-date mono" id="todayDate"></span>
           <button class="day-arrow" id="dayNext" type="button" aria-label="Día siguiente">›</button>
         </div>
-        <button class="logout-btn" id="logoutBtn">salir</button>
       </div>
     </div>
   </header>
@@ -206,12 +207,13 @@
       <button class="btn-primary" id="reportBtn" style="--cat-color: var(--accent)">Compartir reporte</button>
       <button class="btn-link" id="reportDownloadBtn" type="button">Descargar como .txt</button>
     </details>
+    <button class="btn-ghost account-logout" id="logoutBtn" type="button">Cerrar sesión</button>
   </div>
 </div>
 
 <!-- ============ TAB BAR FIJA ============ -->
-<nav class="tabbar hidden" id="tabBar">
-  <button class="tab-btn active" data-tab="hoy"><span class="tab-ic">◉</span><span class="tab-lb">Hoy</span></button>
+<nav class="tabbar hidden" id="tabBar" aria-label="Navegación principal">
+  <button class="tab-btn active" data-tab="hoy" aria-current="page"><span class="tab-ic">◉</span><span class="tab-lb">Hoy</span></button>
   <button class="tab-btn" data-tab="habitos"><span class="tab-ic">✓</span><span class="tab-lb">Hábitos</span></button>
   <button class="tab-btn" data-tab="sueno"><span class="tab-ic">☾</span><span class="tab-lb">Sueño</span></button>
   <button class="tab-btn" data-tab="ranking"><span class="tab-ic">♛</span><span class="tab-lb">Ranking</span></button>
@@ -220,12 +222,12 @@
 
 <!-- ============ BOTTOM SHEET ============ -->
 <div class="sheet-backdrop hidden" id="sheetBackdrop"></div>
-<div class="sheet hidden" id="sheet" role="dialog" aria-modal="true">
+<div class="sheet hidden" id="sheet" role="dialog" aria-modal="true" aria-label="Formulario de registro">
   <button class="sheet-grip-btn" id="sheetGrip" type="button" aria-label="Cerrar"><span class="sheet-grip"></span></button>
   <div id="formArea"></div>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
 <script>
   // Chequeo instantáneo, antes de que cargue Supabase: si no hay token
@@ -240,6 +242,6 @@
     }
   })();
 </script>
-<script type="module" src="js/app.js?v=27"></script>
+<script type="module" src="js/app.js?v=28"></script>
 </body>
 </html>
