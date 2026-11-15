@@ -910,6 +910,24 @@ button:focus-visible, summary:focus-visible{ outline: 2px solid var(--accent); o
 .account-logout{ width:100%; min-height:48px; margin:12px 0 20px; color:var(--text-dim); }
 .insight-label{ display:block; font-size:11px; font-weight:500; color:var(--accent); margin-bottom:8px; }
 .insight-card small{ display:block; font-size:11px; line-height:1.6; margin-top:10px; color:var(--text-dim); }
+.smart-card{ margin:0 0 18px; background:var(--surface-sunken); border-radius:var(--r-md); padding:0 14px; }
+.smart-card > summary,#energyModelCard > summary{ min-height:52px; padding:14px 0; cursor:pointer; font-size:14px; }
+.smart-food{ display:flex; align-items:center; gap:8px; padding:8px 0; }
+.smart-food-main{ flex:1; min-width:0; border:0; background:none; text-align:left; padding:8px 0; }
+.smart-food-main b,.smart-food-main span,.smart-food-main small{ display:block; }
+.smart-food-main b{ font-size:14px; font-weight:500; }
+.smart-food-main span{ font-size:12px; color:var(--text-dim); margin-top:4px; }
+.smart-food-main small{ color:var(--accent); font-size:12px; margin-top:6px; }
+.smart-hide{ flex:none; width:44px; height:44px; background:none; border:0; color:var(--text-dim); border-radius:50%; font-size:22px; }
+.learning-toggle{ display:flex; align-items:center; gap:10px; min-height:48px; padding:10px 0; font-size:13px; color:var(--text-dim); }
+.learning-toggle input{ width:22px; height:22px; flex:none; accent-color:var(--accent); }
+.micro-coverage{ font-size:11px; color:var(--text-dim); margin-top:5px; }
+.micro-estimate{ color:var(--c-comida); background:var(--surface-sunken); border-radius:8px; padding:8px 10px; font-size:11px; margin-top:8px; }
+.micro-estimate summary{ cursor:pointer; padding:8px 0; }
+.micro-estimate p{ overflow-wrap:anywhere; }
+.micro-row.is-partial .micro-fill,.micro-row.is-info .micro-fill{ background:var(--text-dim); }
+#energyModelCard a,.micro-acc a{ color:var(--accent); font-size:12px; }
+#completeDaysArea{ max-height:280px; overflow-y:auto; }
 @media (max-width:359px){
   .shell{ padding-left:16px; padding-right:16px; }
   .wordmark{ font-size:14px; }

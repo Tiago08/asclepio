@@ -1,6 +1,6 @@
 // Fase 2: metas por día, perfil físico, peso, suplementos, agua y combos.
 // Solo acceso a datos y cálculos; las pantallas están en app.js.
-import { supabase } from './supabaseClient.js?v=28';
+import { supabase } from './supabaseClient.js?v=29';
 
 function must({ data, error }) {
   if (error) throw error;
@@ -132,6 +132,17 @@ export function suggestGoals(body, weightKg, year = new Date().getFullYear()) {
 export async function getWeights(userId, limit = 90) {
   return must(await supabase.from('weight_logs').select('*').eq('user_id', userId)
     .order('log_date', { ascending: false }).limit(limit)) || [];
+}
+
+/** Historial de comida para modelos: carga explícita y paginada, solo del propietario. */
+export async function getNutritionHistory(userId, fromDate, toDate){
+  const rows=[];
+  for(let offset=0;;offset+=500){
+    const page=must(await supabase.from('food_logs').select('*').eq('user_id',userId)
+      .gte('log_date',fromDate).lte('log_date',toDate)
+      .order('log_date',{ascending:true}).order('id',{ascending:true}).range(offset,offset+499))||[];
+    rows.push(...page);if(page.length<500)return rows;
+  }
 }
 
 /** Un peso por día: si ya pesaste hoy, se reemplaza. */

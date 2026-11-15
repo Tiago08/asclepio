@@ -1,6 +1,6 @@
-import { supabase } from './supabaseClient.js?v=28';
-import { USDA_API_KEY } from './config.js?v=28';
-import { dictQueryToEnglish, normalizeText } from './foodDict.js?v=28';
+import { supabase } from './supabaseClient.js?v=29';
+import { USDA_API_KEY } from './config.js?v=29';
+import { dictQueryToEnglish, normalizeText } from './foodDict.js?v=29';
 
 // Campos nutricionales que manejamos en toda la app, en el orden
 // en que se muestran. Un solo lugar para no desincronizar listas.
@@ -16,7 +16,7 @@ export const NUTRIENT_FIELDS = [
   { key: 'potassium_mg', label: 'Potasio', unit: 'mg' },
   { key: 'calcium_mg', label: 'Calcio', unit: 'mg' },
   { key: 'iron_mg', label: 'Hierro', unit: 'mg' },
-  { key: 'vit_a_mcg', label: 'Vitamina A', unit: 'mcg' },
+  { key: 'vit_a_mcg', label: 'Vitamina A (RAE)', unit: 'mcg' },
   { key: 'vit_c_mg', label: 'Vitamina C', unit: 'mg' },
   { key: 'vit_d_mcg', label: 'Vitamina D', unit: 'mcg' },
   { key: 'vit_b12_mcg', label: 'Vitamina B12', unit: 'mcg' }
@@ -28,7 +28,7 @@ export const MICRO_FIELDS = [
   { key: 'magnesium_mg', label: 'Magnesio', unit: 'mg' },
   { key: 'zinc_mg', label: 'Zinc', unit: 'mg' },
   { key: 'vit_b6_mg', label: 'Vitamina B6', unit: 'mg' },
-  { key: 'folate_mcg', label: 'Folato', unit: 'mcg' },
+  { key: 'folate_mcg', label: 'Folato (DFE)', unit: 'mcg' },
   { key: 'omega3_mg', label: 'Omega-3 (EPA+DHA)', unit: 'mg' }
 ];
 
@@ -39,14 +39,13 @@ const USDA_MICRO_MAP = {
   '415': 'vit_b6_mg', '1175': 'vit_b6_mg',
   '435': 'folate_mcg', '1190': 'folate_mcg'
 };
-const USDA_FOLATE_TOTAL = ['417', '1177'];   // si no trae folato DFE, se usa el total
 const USDA_EPA = ['629', '1278'], USDA_DHA = ['621', '1272'];   // en gramos
 
 /** Multiplica cada micro por la cantidad; devuelve un objeto nuevo. */
 export function scaleMicros(micros, q) {
   const out = {};
   for (const [k, v] of Object.entries(micros || {})) {
-    if (v != null && Number.isFinite(Number(v))) out[k] = Math.round(Number(v) * Number(q) * 1000) / 1000;
+    if (v != null && String(v).trim()!=='' && typeof v!=='boolean' && Number.isFinite(Number(v)) && Number(v)>=0) out[k] = Math.round(Number(v) * Number(q) * 1000) / 1000;
   }
   return out;
 }
@@ -208,23 +207,32 @@ function cleanUsdaName(food) {
   return name || String(food.description || '');
 }
 
-function usdaFoodToRow(food) {
+export function usdaFoodToRow(food) {
   const row = emptyNutrients();
   const micros = {};
-  let folateTotal = null, omega = null;
+  const omegaParts = {};
   (food.foodNutrients || []).forEach(n => {
-    const num = String(n.nutrientNumber ?? n.number ?? '');
-    const value = typeof n.value === 'number' ? n.value : (n.amount ?? null);
+    const num = String(n.nutrientNumber ?? n.number ?? n.nutrient?.number ?? n.nutrient?.id ?? n.nutrientId ?? '');
+    const raw = n.value ?? n.amount;
     const field = USDA_NUTRIENT_MAP[num];
-    if (field && row[field] == null) row[field] = value;
-    if (value == null) return;
     const micro = USDA_MICRO_MAP[num];
+    const omegaPart=USDA_EPA.includes(num)?'epa':USDA_DHA.includes(num)?'dha':null;
+    const expected=omegaPart?'g':[...NUTRIENT_FIELDS,...MICRO_FIELDS].find(f=>f.key===(field||micro))?.unit;
+    if(raw==null || raw==='' || !Number.isFinite(Number(raw)) || Number(raw)<0 || !expected)return;
+    const unit=String(n.unitName ?? n.nutrient?.unitName ?? expected).toLowerCase().replace(/^[µμu]g$/,'mcg');
+    const mass={g:1,mg:.001,mcg:.000001};
+    let value=Number(raw);
+    if(unit!==expected){
+      if(mass[unit] && mass[expected])value*=mass[unit]/mass[expected];
+      else return; // No mezclar IU, kJ u otra unidad con nuestras unidades.
+    }
+    if (field && row[field] == null) row[field] = value;
     if (micro && micros[micro] == null) micros[micro] = value;
-    if (USDA_FOLATE_TOTAL.includes(num)) folateTotal = value;
-    if (USDA_EPA.includes(num) || USDA_DHA.includes(num)) omega = (omega || 0) + value * 1000; // g -> mg
+    if(omegaPart)omegaParts[omegaPart]=value*1000;
   });
-  if (micros.folate_mcg == null && folateTotal != null) micros.folate_mcg = folateTotal;
-  if (omega != null) micros.omega3_mg = Math.round(omega);
+  // Folato total y DFE no son intercambiables en alimentos fortificados.
+  // EPA+DHA solo está completo si se conocen ambos, incluidos ceros explícitos.
+  if (omegaParts.epa != null && omegaParts.dha != null) micros.omega3_mg = omegaParts.epa+omegaParts.dha;
   const nameEn = cleanUsdaName(food);
   const cached = cachedSpanish(nameEn);
   const brand = food.brandName || food.brandOwner || null; // la marca, no la corporación

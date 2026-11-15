@@ -15,24 +15,25 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/styles.css?v=28">
+<link rel="stylesheet" href="css/styles.css?v=29">
 <!-- Precarga en paralelo: sin esto el navegador descubre cada módulo
      solo después de bajar el anterior (una cascada en serie). -->
 <link rel="modulepreload" href="https://esm.sh/@supabase/supabase-js@2.119.0/es2022/supabase-js.bundle.mjs" crossorigin>
-<link rel="modulepreload" href="js/app.js?v=28">
-<link rel="modulepreload" href="js/supabaseClient.js?v=28">
-<link rel="modulepreload" href="js/config.js?v=28">
-<link rel="modulepreload" href="js/auth.js?v=28">
-<link rel="modulepreload" href="js/foods.js?v=28">
-<link rel="modulepreload" href="js/foodDict.js?v=28">
-<link rel="modulepreload" href="js/basics.js?v=28">
-<link rel="modulepreload" href="js/activity.js?v=28">
-<link rel="modulepreload" href="js/report.js?v=28">
-<link rel="modulepreload" href="js/health.js?v=28">
-<link rel="modulepreload" href="js/habits.js?v=28">
-<link rel="modulepreload" href="js/micros.js?v=28">
-<link rel="modulepreload" href="js/sleep.js?v=28">
-<link rel="modulepreload" href="js/sleepPersonal.js?v=28">
+<link rel="modulepreload" href="js/app.js?v=29">
+<link rel="modulepreload" href="js/supabaseClient.js?v=29">
+<link rel="modulepreload" href="js/config.js?v=29">
+<link rel="modulepreload" href="js/auth.js?v=29">
+<link rel="modulepreload" href="js/foods.js?v=29">
+<link rel="modulepreload" href="js/foodDict.js?v=29">
+<link rel="modulepreload" href="js/basics.js?v=29">
+<link rel="modulepreload" href="js/activity.js?v=29">
+<link rel="modulepreload" href="js/report.js?v=29">
+<link rel="modulepreload" href="js/health.js?v=29">
+<link rel="modulepreload" href="js/habits.js?v=29">
+<link rel="modulepreload" href="js/micros.js?v=29">
+<link rel="modulepreload" href="js/intelligence.js?v=29">
+<link rel="modulepreload" href="js/sleep.js?v=29">
+<link rel="modulepreload" href="js/sleepPersonal.js?v=29">
 </head>
 <body data-tab="hoy">
 
@@ -88,6 +89,7 @@
     <h2 class="section-title">Comidas</h2>
     <section class="meal-list" id="mealList" aria-label="Comidas de hoy"></section>
     <div class="favorites-row" id="favoritesRow"></div>
+    <details class="smart-card" id="smartDiary"><summary>Sugerencias para tu día <span class="model-badge">Local</span></summary><div id="smartFoodArea"></div></details>
     <div id="microArea"></div>
     <div id="insightArea"></div>
     <div class="section-row">
@@ -183,6 +185,14 @@
       <div id="weightList"></div>
     </div>
 
+    <details class="data-card" id="energyModelCard">
+      <summary>Mi gasto energético adaptativo <span class="model-badge">Experimental</span></summary>
+      <p>Aprende de tu peso y comida. Marca solo días con toda tu ingesta registrada. Estas marcas y los alimentos ocultos se conservan en este dispositivo, por cuenta.</p>
+      <button class="btn-ghost" id="refreshEnergyBtn" type="button">Actualizar modelo</button>
+      <div id="energyModelArea" role="status"></div>
+      <details class="more-fields"><summary>Revisar días de comida completos</summary><div id="completeDaysArea"></div></details>
+      <details class="more-fields"><summary>Cómo se valida</summary><p>Regresión del balance energético con regularización hacia tu estimación inicial. Requiere 35 días completos consecutivos y 18 pesos. Se prueba sobre los últimos 6 pesos usando solo datos anteriores; se habilita si reduce el error al menos un 10 %. La conversión aproximada de 7700 kcal/kg no representa toda la dinámica del peso ni distingue agua de tejido.</p><p>La propuesta pasa a tus campos para revisión; tú decides guardarla. No cambia metas automáticamente.</p><a href="https://www.niddk.nih.gov/research-funding/at-niddk/labs-branches/laboratory-biological-modeling/integrative-physiology-section/research/body-weight-planner" target="_blank" rel="noopener">NIDDK: límites y modelos de cambio de peso</a></details>
+    </details>
     <h2 class="section-title">Registros</h2>
     <button class="data-card data-link" id="openHistoryBtn" type="button">
       <span><b>Historial</b><small>Todo lo que registraste, día por día (60 días)</small></span><span class="dl-arrow">›</span>
@@ -242,6 +252,6 @@
     }
   })();
 </script>
-<script type="module" src="js/app.js?v=28"></script>
+<script type="module" src="js/app.js?v=29"></script>
 </body>
 </html>

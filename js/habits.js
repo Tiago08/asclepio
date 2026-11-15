@@ -1,6 +1,6 @@
 // Fase 3: hábitos. Solo acceso a datos; la pantalla está en app.js.
 // No dan puntos ni cuentan para la racha.
-import { supabase } from './supabaseClient.js?v=28';
+import { supabase } from './supabaseClient.js?v=29';
 
 function must({ data, error }) {
   if (error) throw error;

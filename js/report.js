@@ -1,4 +1,4 @@
-import { NUTRIENT_FIELDS, MICRO_FIELDS, foodLogLabel } from './foods.js?v=28';
+import { NUTRIENT_FIELDS, MICRO_FIELDS, foodLogLabel } from './foods.js?v=29';
 
 function fmtNum(v){
   if(v === null || v === undefined) return '—';

@@ -1,28 +1,30 @@
-import { nightScore, personalModel, journalPatterns, sleepPreferences, storeSleepPreferences, wireSleepJournal, validateSleepJournal } from './sleepPersonal.js?v=28';
-import { sleepMetrics, sleepReference, sleepScore } from './sleep.js?v=28';
-import { supabase } from './supabaseClient.js?v=28';
+import { nightScore, personalModel, journalPatterns, sleepPreferences, storeSleepPreferences, wireSleepJournal, validateSleepJournal } from './sleepPersonal.js?v=29';
+import { sleepMetrics, sleepReference, sleepScore } from './sleep.js?v=29';
+import { supabase } from './supabaseClient.js?v=29';
 import {
   sendMagicLink, verifyEmailCode, signOut, getSession, onAuthChange,
   ensureProfile, getMyProfile, updateDisplayName, updateGoals
-} from './auth.js?v=28';
+} from './auth.js?v=29';
 import {
   NUTRIENT_FIELDS, MICRO_FIELDS, searchUsda, searchLocalFoods, searchFavorites, updateFood,
   cacheUsdaFood, addCustomFood, logFood, deleteFoodLog, moveFoodLog, restoreFoodLog, copyFoodLog, rankFoods, pickForDisplay, translateToSpanish, foodLogLabel, pluralEs
-} from './foods.js?v=28';
+} from './foods.js?v=29';
 import {
   logActivity, updateActivityLog, restoreActivityLog, deleteActivityLog, getEntriesInRange, getRanking, getRecentEntries, invalidateRecentEntries
-} from './activity.js?v=28';
-import { buildReportText, downloadText } from './report.js?v=28';
-import { BASICS, searchBasics } from './basics.js?v=28';
-import { normalizeText } from './foodDict.js?v=28';
+} from './activity.js?v=29';
+import { buildReportText, downloadText } from './report.js?v=29';
+import { BASICS, searchBasics } from './basics.js?v=29';
+import { normalizeText } from './foodDict.js?v=29';
 import {
   getGoalHistory, saveGoalsFrom, goalsForDate, getBodyProfile, saveBodyProfile, suggestGoals, PACES, paceOf, objectiveOf,
   getWeights, saveWeight, deleteWeight, getSupplements, addSupplement, retireSupplement,
   getSupplementLogs, getSupplementLogsInRange, setSupplementTaken, getWaterLogs, addWater, deleteWater,
   electrolyteTotals, getCombos, createCombo, deleteCombo
-} from './health.js?v=28';
-import { HABIT_MOMENTS, getHabits, addHabit, updateHabit, archiveHabit, getHabitLogs, setHabitDone } from './habits.js?v=28';
-import { microTargets, microTotals, microStatus } from './micros.js?v=28';
+} from './health.js?v=29';
+import { HABIT_MOMENTS, getHabits, addHabit, updateHabit, archiveHabit, getHabitLogs, setHabitDone } from './habits.js?v=29';
+import { microTargets, microTotals, microStatus } from './micros.js?v=29';
+import { trainMicroModels, estimateMissing, adaptiveEnergy, foodSignature, recommendFoods } from './intelligence.js?v=29';
+import { getNutritionHistory } from './health.js?v=29';
 
 /* ================= actualización automática ================= */
 /* GitHub Pages deja guardar index.html hasta 10 min y la app instalada en el
@@ -569,6 +571,7 @@ logoutBtn.addEventListener('click', async () => {
 async function handleSession(s){
   session = s;
   if(s){
+    if(user?.id!==s.user.id)resetLearningState();
     user = s.user;
     if(bootedFor === user.id) return;
     bootedFor = user.id;
@@ -579,6 +582,7 @@ async function handleSession(s){
     await bootApp();
   }else{
     invalidateRecentEntries();
+    resetLearningState();
     user = null; profile = null; bootedFor = null;
     closeForm();
     bootScreen.classList.add('hidden');
@@ -683,12 +687,142 @@ let phase2Error = null;
 // y se muestran al abrir el buscador
 let usedFoods = [];
 let usedFoodIds = new Set();
+let microModels=null, microTraining=false, microTrainingPromise=null;
+let energyFoods=null, energyOwner=null, energyLoading=false, energyResult=null;
+
+function resetLearningState(){
+  energyFoods=null;energyOwner=null;energyResult=null;
+  usedFoods=[];usedFoodIds=new Set();recentEntries=[];todayFoods=[];todayFoodRows=[];
+  document.getElementById('energyModelArea').textContent='';
+  document.getElementById('completeDaysArea').textContent='';
+  document.getElementById('smartFoodArea').textContent='';
+  document.getElementById('energyModelCard').open=false;
+}
+
+function readLearningSettings(){
+  try{
+    const saved=JSON.parse(localStorage.getItem('asclepio_learning_'+user.id)||'{}');
+    return {impute:saved.impute===true,completed:saved.completed&&typeof saved.completed==='object'?saved.completed:{},hidden:Array.isArray(saved.hidden)?saved.hidden:[]};
+  }catch{return {impute:false,completed:{},hidden:[]};}
+}
+function writeLearningSettings(value){
+  try{localStorage.setItem('asclepio_learning_'+user.id,JSON.stringify(value));return true;}
+  catch{showToast('No se pudo guardar en este dispositivo');return false;}
+}
+function ensureMicroModels(){
+  if(microModels)return Promise.resolve(microModels);
+  if(microTrainingPromise)return microTrainingPromise;
+  microTraining=true;
+  microTrainingPromise=new Promise(resolve=>{
+    let worker,timer,finished=false;
+    const finish=models=>{if(finished)return;finished=true;clearTimeout(timer);worker?.terminate();resolve(models);};
+    const fallback=()=>{worker?.terminate();setTimeout(()=>{try{finish(trainMicroModels(BASICS));}catch{finish(null);}},0);};
+    try{
+      worker=new Worker(new URL('./nutritionWorker.js?v=29',import.meta.url),{type:'module'});
+      worker.onmessage=ev=>ev.data.models?finish(ev.data.models):fallback();
+      worker.onerror=ev=>{ev.preventDefault();fallback();};
+      timer=setTimeout(fallback,15000);worker.postMessage('train');
+    }catch{fallback();}
+  }).then(models=>{microModels=models;microTraining=false;if(!models)showToast('No se pudo entrenar el modelo local');if(user)renderMicros();return models;});
+  return microTrainingPromise;
+}
+
+function learningCatalog(){
+  const ids=new Set(usedFoods.map(f=>f.usda_fdc_id).filter(Boolean));
+  return [...usedFoods,...BASICS.filter(f=>!ids.has(f.usda_fdc_id))];
+}
+function renderSmartFood(){
+  const wrap=document.getElementById('smartFoodArea');
+  if(!profile || !user)return;
+  const settings=readLearningSettings(),goals=goalsFor(viewDate);
+  const {totals,coverage}=microTotals(todayFoodRows,waterToday);
+  const targets=microTargets(bodyProfile?.sex,bodyProfile?.birth_year?new Date().getFullYear()-bodyProfile.birth_year:null,goals.goal_kcal);
+  const kcal=todayFoodRows.reduce((s,r)=>s+(Number(r.kcal)||0),0),protein=todayFoodRows.reduce((s,r)=>s+(Number(r.protein_g)||0),0);
+  const logs=energyFoods && energyOwner===user.id ? energyFoods.filter(r=>r.log_date<=viewDate) : recentEntries.filter(e=>e.kind==='food' && e.date<=viewDate).map(e=>e.data);
+  const meal=isViewingToday()?guessMomento():'Cena';
+  const completeMacros=todayFoodRows.every(r=>r.kcal!=null && r.protein_g!=null);
+  const result=recommendFoods({catalog:learningCatalog(),targets,totals,coverage,goals,kcal,protein,logs,meal,hidden:settings.hidden,completeMacros});
+  const complete=todayFoodRows.length>0 && settings.completed[viewDate]===foodSignature(todayFoodRows);
+  wrap.innerHTML=`<p class="form-hint">Para ${meal.toLowerCase()} · ${result.preference.active?'preferencias aprendidas y metas':'metas registradas; recopilando preferencias'}. Revisa ingredientes y porción.</p>
+    ${result.items.length?result.items.map((item,i)=>`<div class="smart-food"><button class="smart-food-main" type="button" data-smart-food="${i}"><b>${escapeHtml(item.food.name)}</b><span>${item.portion} g · ${item.kcal} kcal · ${escapeHtml(item.reason)}</span><small>Elegir porción ›</small></button><button class="smart-hide" data-smart-hide="${i}" type="button" aria-label="Ocultar ${escapeHtml(item.food.name)}">×</button></div>`).join(''):`<p class="form-hint">${completeMacros?'Sin sugerencias con los datos y el margen calórico actuales.':'Faltan calorías o proteína en algunos registros; completa esos datos para recibir sugerencias.'}</p>`}
+    <label class="learning-toggle"><input id="completeFoodDay" type="checkbox" ${complete?'checked':''} ${todayFoodRows.length?'':'disabled'}> He registrado toda la comida de este día</label>
+    <p class="form-hint">Marca también aceites, bebidas y extras. Si cambias registros, tendrás que confirmar el día otra vez. No suma puntos.</p>
+    <details class="more-fields"><summary>Personalización y alimentos ocultos</summary><p>El modelo aprende qué alimentos eliges en cada comida; se activa con al menos 40 registros en 14 días si mejora un 5 % la pérdida logarítmica frente a la frecuencia global en días posteriores. ${result.preference.count} registros disponibles.${result.preference.validation?` Prueba: ${result.preference.validation} registros; error ${result.preference.error.toFixed(2)} vs ${result.preference.baseline.toFixed(2)}.`:''} Los micros incompletos no se interpretan como carencias.</p><button class="btn-link" id="resetHiddenFoods" type="button">Mostrar alimentos ocultos (${settings.hidden.length})</button></details>`;
+  wrap.querySelectorAll('[data-smart-food]').forEach(button=>button.addEventListener('click',()=>{
+    const item=result.items[Number(button.dataset.smartFood)];
+    pendingMomento=meal;
+    openQuantityStep({...item.food,_last:{quantity:item.quantity,label:item.food.name+' · '+item.portion+' g'}});
+  }));
+  wrap.querySelectorAll('[data-smart-hide]').forEach(button=>button.addEventListener('click',()=>{
+    const next=readLearningSettings();next.hidden=[...new Set([...next.hidden,result.items[Number(button.dataset.smartHide)].key])];
+    if(writeLearningSettings(next))renderSmartFood();
+  }));
+  document.getElementById('resetHiddenFoods').onclick=()=>{if(writeLearningSettings({...readLearningSettings(),hidden:[]}))renderSmartFood();};
+  document.getElementById('completeFoodDay').onchange=ev=>{
+    const next=readLearningSettings();
+    if(ev.target.checked)next.completed[viewDate]=foodSignature(todayFoodRows);else delete next.completed[viewDate];
+    if(!writeLearningSettings(next)){ev.target.checked=!ev.target.checked;return;}
+    if(energyFoods && energyOwner===user.id){energyFoods=[...energyFoods.filter(r=>r.log_date!==viewDate),...todayFoodRows];renderEnergyModel();}
+  };
+}
+
+async function loadEnergyModel(){
+  if(energyLoading)return;
+  const owner=user.id;energyLoading=true;
+  const btn=document.getElementById('refreshEnergyBtn');btn.disabled=true;
+  document.getElementById('energyModelArea').textContent='Cargando tu historial…';
+  try{
+    const [foods,newWeights]=await Promise.all([getNutritionHistory(owner,daysAgoStr(69),todayStr()),getWeights(owner)]);
+    if(user?.id!==owner)return;
+    energyFoods=foods;energyOwner=owner;weights=newWeights;renderEnergyModel();renderSmartFood();
+  }catch(err){if(user?.id===owner)document.getElementById('energyModelArea').textContent='No se pudo cargar: '+err.message;}
+  finally{energyLoading=false;btn.disabled=false;}
+}
+function renderEnergyModel(){
+  if(!energyFoods || energyOwner!==user?.id)return;
+  const settings=readLearningSettings();
+  const initial=suggestGoals(bodyProfile,latestWeight());
+  const firstDate=energyFoods.map(r=>r.log_date).sort()[0];
+  const earliest=weights.filter(w=>w.log_date>=firstDate).sort((a,b)=>a.log_date.localeCompare(b.log_date))[0];
+  const reference=suggestGoals(bodyProfile,Number(earliest?.weight_kg)||latestWeight());
+  energyResult=adaptiveEnergy({foods:energyFoods,weights,completed:settings.completed,prior:reference?.tdee,bmr:initial?.bmr,today:todayStr()});
+  const model=energyResult,area=document.getElementById('energyModelArea');
+  const stateText={profile:'Completa tu perfil físico y peso para crear la referencia.',collecting:`Recopilando: ${model.days||0}/35 días completos consecutivos recientes${model.weights!=null?` · ${model.weights}/18 pesos`:''}.`,stale:'El bloque de datos quedó desactualizado. Registra nuevos días completos.',baseline:'Tu estimación inicial sigue siendo más fiable.'};
+  const goal=goalsFor(todayStr()),floor=initial?Math.max(initial.bmr,bodyProfile.sex==='hombre'?1500:1200):0;
+  let proposal=null;
+  if(model.state==='active'){
+    const desired=model.tdee+paceOf(bodyProfile)*7700/7;
+    const bounded=Math.max(goal.goal_kcal-150,Math.min(goal.goal_kcal+150,desired));
+    const candidate=Math.max(Math.ceil(floor/10)*10,Math.round(bounded/10)*10);
+    if(Math.abs(candidate-goal.goal_kcal)<=150 && candidate>=goal.goal_protein_g*4+goal.goal_fat_g*9)proposal=candidate;
+  }
+  area.innerHTML=`<p>${model.state==='active'?`Gasto estimado: <b>${model.tdee} kcal/día</b>.`:stateText[model.state]}</p>${model.mae!=null?`<p class="form-hint">Error en los 6 pesos de prueba: ${model.mae.toFixed(2)} kg frente a ${model.baseline.toFixed(2)} kg de la referencia. ${model.days} días · ${model.weights} pesos.</p>`:''}${proposal!=null?`<button class="btn-primary" id="useAdaptiveGoal" type="button">Revisar propuesta: ${proposal} kcal</button><p class="form-hint">Paso máximo de 150 kcal respecto a tu meta, respetando el gasto en reposo.</p>`:''}`;
+  document.getElementById('useAdaptiveGoal')?.addEventListener('click',()=>{
+    fillGoalInputs({...goal,goal_kcal:proposal,goal_carbs_g:Math.max(0,Math.round((proposal-goal.goal_protein_g*4-goal.goal_fat_g*9)/4))},true);
+    document.getElementById('goalEditor').open=true;
+    document.querySelector('.goal-card').scrollIntoView({behavior:'smooth',block:'start'});
+    showToast('Revisa la propuesta y guarda la meta si te sirve');
+  });
+  const grouped={};energyFoods.forEach(r=>(grouped[r.log_date] ||= []).push(r));
+  const dates=Object.keys(grouped).sort().reverse();
+  document.getElementById('completeDaysArea').innerHTML=dates.length?dates.map(date=>`<label class="learning-toggle"><input data-complete-date="${date}" type="checkbox" ${settings.completed[date]===foodSignature(grouped[date])?'checked':''}> ${escapeHtml(date)} · ${Math.round(grouped[date].reduce((s,r)=>s+(Number(r.kcal)||0),0))} kcal</label>`).join(''):'<p class="form-hint">Todavía no hay días con comida registrada.</p>';
+  document.querySelectorAll('[data-complete-date]').forEach(input=>input.onchange=()=>{
+    const next=readLearningSettings(),date=input.dataset.completeDate;
+    if(input.checked)next.completed[date]=foodSignature(grouped[date]);else delete next.completed[date];
+    if(writeLearningSettings(next)){renderEnergyModel();renderSmartFood();}else input.checked=!input.checked;
+  });
+}
+document.getElementById('refreshEnergyBtn').addEventListener('click',loadEnergyModel);
+document.getElementById('energyModelCard').addEventListener('toggle',ev=>{
+  if(ev.currentTarget.open && energyOwner!==user?.id)loadEnergyModel();
+});
 
 async function renderFavorites(){
   try{
     const used = await searchFavorites(user.id, 30);
     usedFoods = used;
     usedFoodIds = new Set(used.map(f => f.id));
+    renderMicros();renderSmartFood();
     const favs = used.slice(0, 6);
     // combos primero (abren su hoja para confirmar), luego tus alimentos de un toque
     const comboChips = combos.slice(0, 3).map((c, i) => `<button class="fav-chip fav-combo" data-fav-combo="${i}" type="button">🧺 ${escapeHtml(c.name)}</button>`).join('');
@@ -2123,6 +2257,7 @@ function renderDaily(){
   dayTiles.querySelector('#tileBano').addEventListener('click', () => openActivityForm('bano'));
   dayTiles.querySelector('#tileEnergia').addEventListener('click', () => openActivityForm('energia'));
   renderMicros();
+  renderSmartFood();
 }
 
 /* ---- micronutrientes: sección plegable, cerrada por defecto ---- */
@@ -2141,38 +2276,46 @@ function renderMicros(){
   const sex = bodyProfile && bodyProfile.sex ? bodyProfile.sex : null;
   const age = bodyProfile && bodyProfile.birth_year ? new Date().getFullYear() - Number(bodyProfile.birth_year) : null;
   const targets = microTargets(sex, age, goalsFor(viewDate).goal_kcal);
-  const { totals, has } = microTotals(todayFoodRows, waterToday);
+  const { totals, has, coverage } = microTotals(todayFoodRows, waterToday);
+  const settings=readLearningSettings();
+  if(settings.impute && !microModels && !microTraining && !microTrainingPromise)void ensureMicroModels();
+  const estimates=settings.impute && microModels ? estimateMissing(todayFoodRows,usedFoods,microModels) : [];
   let ok = 0, over = 0;
   // los que traen dato primero; los "sin datos" al final, para no tapar lo que sí se sabe
   targets.sort((a, b) => (has[a.key] ? 0 : 1) - (has[b.key] ? 0 : 1));
   const rows = targets.map(t => {
     const v = totals[t.key] || 0;
-    const st = microStatus(t, v, !!has[t.key]);
+    const cov=coverage[t.key]||{known:0,total:todayFoodRows.length};
+    const st = microStatus(t, v, !!has[t.key], cov.known===cov.total);
+    const estimated=estimates.map(e=>e[t.key]).filter(Boolean);
+    const estimatedValue=estimated.reduce((s,e)=>s+e.value,0), estimatedError=estimated.reduce((s,e)=>s+e.error,0);
     if(st === 'ok' && !t.limitOnly) ok++;
     if(st === 'over') over++;
     // escala de la barra: 1,5 veces la meta (o 1,25 veces el máximo si solo hay máximo)
-    const scale = t.limitOnly ? t.max * 1.25 : t.goal * 1.5;
+    const scale = t.informational ? Math.max(1,v*1.25) : t.limitOnly ? t.max * 1.25 : t.goal * 1.5;
     const pct = x => Math.max(0, Math.min(100, (x / scale) * 100));
     const marks = [
       t.min != null && t.min < t.goal ? `<i class="mk mk-min" style="left:${pct(t.min)}%"></i>` : '',
       t.goal != null ? `<i class="mk mk-goal" style="left:${pct(t.goal)}%"></i>` : '',
       t.max != null && t.max <= scale ? `<i class="mk mk-max" style="left:${pct(t.max)}%"></i>` : ''
     ].join('');
-    const ref = t.limitOnly
+    const ref = t.informational ? 'Azúcares totales: no equivalen a azúcares añadidos.' : t.limitOnly
       ? `máx ${fmtMicro(t.max)}`
-      : [`mín ${fmtMicro(t.min)}`, `meta ${fmtMicro(t.goal)}`, t.max != null ? `máx ${fmtMicro(t.max)}` : null].filter(Boolean).join(' · ');
-    const stTxt = { none: 'sin datos', low: 'bajo', near: 'casi', ok: t.limitOnly ? 'bien' : 'en meta', over: 'pasado' }[st];
+      : [t.min!=null ? `EAR ${fmtMicro(t.min)}` : null, `meta ${fmtMicro(t.goal)}`, t.max != null ? `límite ${fmtMicro(t.max)}` : null].filter(Boolean).join(' · ');
+    const stTxt = { none: 'sin datos', low: 'por completar', near: 'casi', ok: t.limitOnly ? 'dentro del límite' : 'en meta', over: 'sobre el límite',partial:'parcial',info:'informativo' }[st];
     return `
       <div class="micro-row is-${st}">
         <div class="micro-top">
           <span class="micro-name">${escapeHtml(t.label)} <span class="micro-st">${stTxt}</span></span>
-          <span class="mono"><b>${st === 'none' ? '—' : fmtMicro(v)}</b> / ${fmtMicro(t.limitOnly ? t.max : t.goal)} ${t.unit}</span>
+          <span class="mono"><b>${st === 'none' ? '—' : fmtMicro(v)}</b>${t.informational?'':` / ${fmtMicro(t.limitOnly ? t.max : t.goal)}`} ${t.unit}</span>
         </div>
         <div class="micro-bar"><span class="micro-fill" style="width:${st === 'none' ? 0 : pct(v)}%"></span>${marks}</div>
         <div class="micro-ref mono">${ref}</div>
+        <div class="micro-coverage">Dato en ${cov.known}/${cov.total} registros${cov.known<cov.total ? ' · total incompleto' : ''}</div>
+        ${estimated.length ? `<div class="micro-estimate">≈ +${fmtMicro(estimatedValue)} ${t.unit} estimados aparte${estimatedError?` · error orientativo ±${fmtMicro(estimatedError)}`:''}<details><summary>Ver procedencia</summary>${estimated.map(e=>`<p>${e.method==='knn'?'ML: vecinos nutricionales':'Referencia actual del catálogo'} · ${fmtMicro(e.value)} ${t.unit}. Referencias USDA: ${e.neighbors.map(id=>escapeHtml(id)).join(', ')}.</p>`).join('')}</details></div>` : ''}
       </div>`;
   }).join('');
-  const goalsCount = targets.filter(t => !t.limitOnly).length;
+  const goalsCount = targets.filter(t => !t.limitOnly && !t.informational).length;
   const summary = todayFoodRows.length
     ? `${ok} de ${goalsCount} en meta${over ? ` · <span class="micro-over">${over} pasado${over === 1 ? '' : 's'}</span>` : ''}`
     : 'sin comida registrada';
@@ -2182,13 +2325,21 @@ function renderMicros(){
   microArea.innerHTML = `
     <details class="micro-acc"${open ? ' open' : ''}>
       <summary><span class="micro-title">🔬 Micronutrientes</span><span class="micro-sum">${summary}</span></summary>
-      <div class="micro-legend"><span><i class="mk mk-min"></i>mínimo</span><span><i class="mk mk-goal"></i>meta</span><span><i class="mk mk-max"></i>máximo seguro</span></div>
+      <div class="micro-legend"><span><i class="mk mk-min"></i>EAR</span><span><i class="mk mk-goal"></i>meta</span><span><i class="mk mk-max"></i>límite de referencia</span></div>
+      <label class="learning-toggle"><input id="estimateMicrosToggle" type="checkbox" ${settings.impute?'checked':''}> Mostrar estimaciones separadas</label>
+      <p class="form-hint">${microTraining?'Entrenando modelos locales…':microModels?`${Object.values(microModels).filter(m=>m.active).length} de ${Object.keys(microModels).length} modelos superan la referencia.`:'Se prioriza el catálogo; ML solo estima nutrientes con validación suficiente.'} Los datos registrados conservan sus valores.</p>
       <div class="micro-list">${rows}</div>
-      <p class="form-hint micro-hint">${who ? `Valores de referencia para ${escapeHtml(who)}.` : 'Completa sexo y edad en Datos para metas exactas (por ahora: hombre adulto).'}
-        Muchos alimentos no traen todos los micronutrientes: un número bajo puede ser falta de datos.</p>
+      <p class="form-hint micro-hint">${who ? `Valores de referencia para ${escapeHtml(who)}.` : 'Completa sexo y edad en Datos (referencia provisional: hombre adulto).'}
+        Cobertura de campos, no de tu ingesta real. Una suma parcial no demuestra carencia ni seguridad. No incluye suplementos. Las estimaciones no deciden estados ni metas.</p>
+      <details class="more-fields"><summary>Validación y unidades</summary><p>k-NN entrenado con los básicos USDA. Validación dejando fuera cada FDC; al menos 30 pruebas, mejora del 10 % frente a la mediana de categoría y abstención ante alimentos alejados o error alto. No estima vitaminas A, D, B12, folato ni omega-3. El error orientativo usa el percentil 90 de errores de categoría; no es un intervalo garantizado.</p>${microModels?Object.values(microModels).map(m=>`<p>${escapeHtml(targets.find(t=>t.key===m.key)?.label||m.key)}: ${m.active?'habilitado':'sin mejora suficiente'} · ${m.count} pruebas${m.mae!=null?` · MAE ${fmtMicro(m.mae)} vs ${fmtMicro(m.baseline)} por 100 g`:''}.</p>`).join(''):''}<p>Vitamina A en RAE; folato en DFE. Los registros históricos conservan sus valores originales; no se puede verificar retroactivamente su unidad. Las metas no diagnostican deficiencias.</p><a href="https://fdc.nal.usda.gov/data-documentation/" target="_blank" rel="noopener">Documentación USDA</a></details>
     </details>`;
   microArea.querySelector('details').addEventListener('toggle', ev => {
     try{ localStorage.setItem(MICRO_OPEN_KEY, ev.currentTarget.open ? '1' : '0'); }catch(e){ /* sin almacenamiento */ }
+  });
+  document.getElementById('estimateMicrosToggle').addEventListener('change',async ev=>{
+    if(!writeLearningSettings({...readLearningSettings(),impute:ev.target.checked})){ev.target.checked=!ev.target.checked;return;}
+    if(ev.target.checked){const training=ensureMicroModels();renderMicros();await training;}
+    renderMicros();
   });
 }
 
@@ -2913,6 +3064,7 @@ async function renderStats(){
     const list = await getRecentEntries(user.id, daysAgoStr(13), todayStr());
     recentEntries = list;
     renderMeals(todayFoods);   // ya se sabe qué comiste ayer: aparece "Repetir ayer"
+    renderSmartFood();
     await renderInsight(list);
   }catch(err){ insightArea.innerHTML = ''; }
 }
@@ -2996,6 +3148,11 @@ document.addEventListener('visibilitychange', async () => {
 
 async function refreshAfterLog(){
   invalidateRecentEntries();
+  if(energyFoods){
+    energyFoods=null;energyOwner=null;energyResult=null;
+    document.getElementById('energyModelArea').textContent='Tus registros cambiaron. Actualiza el modelo.';
+    document.getElementById('completeDaysArea').textContent='Actualiza para revisar los días.';
+  }
   await reloadDailyIfNewDay();
   await Promise.all([renderToday(), renderStats(), renderFavorites(),
     getMyProfile(user.id).then(p => { profile = p; }).catch(() => {})]);
@@ -3223,6 +3380,7 @@ document.getElementById('saveObjectiveBtn').addEventListener('click', async (ev)
 /* ================= peso corporal ================= */
 
 function renderWeights(){
+  renderEnergyModel();
   const wrap = document.getElementById('weightList');
   document.getElementById('weightSummary').textContent = weights.length ? `${String(weights[0].weight_kg).replace('.', ',')} kg` : 'Sin registros';
   if(!weights.length){ wrap.innerHTML = `<div class="search-empty">Todavía no hay pesos registrados.</div>`; return; }

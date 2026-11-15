@@ -1,3 +1,34 @@
+# Modelos locales y micronutrientes · versión 29
+
+Implementado el 15 de noviembre de 2026. Frontend estático, sin npm, build, APIs generativas, dependencias nuevas ni cambios en Supabase. No hay SQL que ejecutar.
+
+## Micronutrientes
+
+- Cobertura por nutriente: registros con valor / registros aplicables. Un cero explícito sigue siendo dato; vacío, negativo y nulo no lo son. Los estados parciales no indican carencia ni cumplimiento. Los suplementos no forman parte de esta suma y la interfaz lo aclara.
+- Las estimaciones se activan en el desplegable de micronutrientes y aparecen aparte; no modifican `foods`, `food_logs`, metas, reportes ni ranking. Si el catálogo del alimento ofrece el dato, se utiliza esa referencia actual, escalada por cantidad y etiquetada. No se presenta como reconstrucción exacta del pasado.
+- k-NN ponderado por distancia sobre calorías, proteína, carbohidratos y grasa, normalizados en escala logarítmica dentro de la categoría. Entrenamiento local en un Web Worker con los 110 básicos USDA; alternativa en el hilo principal si el navegador no admite el worker.
+- Validación dejando fuera cada FDC, sin usar el nutriente objetivo como entrada. Se exige un mínimo de 30 pruebas, reducción del MAE de al menos el 10 % respecto a la mediana de categoría y error acotado respecto al promedio. También se exige categoría conocida, vecinos cercanos y al menos cinco errores de validación en esa categoría. Se abstiene para productos de marca, alimentos personalizados, cantidades desconocidas y referencias insuficientes.
+- **Resultado del catálogo actual:** zinc habilitado, 65 pruebas, MAE 0,386 frente a 0,472 mg/100 g. Fibra, potasio, magnesio, calcio, hierro y B6 no superan el umbral y no se imputan con ML. La app muestra estos resultados; no se rebajaron los criterios para habilitar más modelos. El error orientativo es el percentil 90 de errores de categoría; no garantiza cobertura probabilística.
+- Se excluyen de imputación vitaminas A, D, B12, folato y omega-3. La importación convierte unidades de masa y rechaza unidades incompatibles; folato total no sustituye DFE y EPA+DHA exige ambos componentes conocidos. Los registros históricos conservan sus valores y no pueden verificar retrospectivamente unidades o composición.
+- Azúcares totales pasan a informativos, sin aplicarles el límite de añadidos. No se aplica el UL de vitamina A preformada al total RAE; se corrigen vitamina D a partir de 71 años y calcio a partir de 51. Las referencias AI no se etiquetan como EAR. EPA+DHA mantiene el objetivo orientativo existente de 500 mg, sin atribuirle DRI o EAR.
+
+## Personalización y gasto
+
+- Sugerencias bajo demanda en Hoy: hasta tres categorías, porciones revisables, margen calórico, proteína y nutrientes con cobertura completa. No se interpretan datos parciales como carencias; se excluyen alimentos crudos, harinas, alcohol y opciones incompatibles con límites disponibles. Se pueden ocultar alimentos y restaurarlos.
+- Modelo categórico bayesiano de elección por comida, con suavizado hacia la frecuencia global. Mínimo de 40 registros en 14 fechas; separación temporal por días completos; se activa si reduce un 5 % la pérdida logarítmica sobre la frecuencia global en al menos 10 registros posteriores. Sin datos suficientes, se conserva la selección por metas. No usa datos de amigos.
+- Modelo energético en Datos, con carga explícita del historial paginado de hasta 70 días. Regresión regularizada del balance acumulado de ingesta y peso hacia la referencia calculada con un peso anterior. Requiere 35 días completos consecutivos recientes, 18 pesos y una ventana suficiente para entrenamiento; evaluación temporal en los últimos seis pesos, sin entrenar con ellos antes de predecirlos.
+- La activación exige mejorar el MAE al menos un 10 %, error máximo de 0,6 kg y gasto dentro de límites de plausibilidad. Se respetan el gasto en reposo y los pisos de la calculadora. La propuesta cambia como máximo 150 kcal, preserva proteína y grasa y pasa a los campos de revisión: nunca se guarda sola.
+- La aproximación de 7700 kcal/kg no modela toda la fisiología ni separa agua de tejido; el modelo no reproduce el modelo dinámico del NIDDK. La limitación está visible. Días ausentes no se rellenan con cero; una edición invalida la confirmación de comida completa.
+- Confirmaciones de días, estimaciones activadas y alimentos ocultos: `localStorage` separado por cuenta, sin sincronización entre dispositivos. Los historiales personales no se publican ni se usan para entrenar modelos compartidos. Un fallo de almacenamiento se informa. Nada suma puntos ni rachas.
+
+## Verificación y fuentes
+
+- `node --check` en todos los módulos; `node tests/intelligence.mjs` verifica abstención, validación, porciones, no mutación, huecos de datos, cambios posteriores, balance sintético y preferencias aprendidas.
+- `tests/mobile.cjs`: Chrome/Playwright 390 × 844, servidor Python local y Supabase en memoria. Verifica unidades, cobertura, entrenamiento en worker, estimaciones separadas, ocultar/restaurar sugerencias, revisión de porciones, confirmaciones de ingesta, modelo energético habilitado con datos sintéticos y propuesta sin escrituras, además de los flujos anteriores. Sin errores de consola. Capturas revisadas; no sustituye Safari en un iPhone físico ni valida precisión clínica.
+- Fuentes: [USDA: documentación](https://fdc.nal.usda.gov/data-documentation/), [FDA: azúcares añadidos y totales](https://www.fda.gov/food/nutrition-facts-label/added-sugars-nutrition-facts-label), [FDA: folato DFE y vitamina A RAE](https://www.fda.gov/food/nutrition-facts-label/daily-value-nutrition-and-supplement-facts-labels), [NIH: vitamina A](https://ods.od.nih.gov/factsheets/VitaminA-HealthProfessional/), [NIH: vitamina D](https://ods.od.nih.gov/factsheets/VitaminD-Consumer/), [NIDDK: modelos de cambio de peso](https://www.niddk.nih.gov/research-funding/at-niddk/labs-branches/laboratory-biological-modeling/integrative-physiology-section/research/body-weight-planner).
+
+---
+
 # Revisión UX/UI · versión 28
 
 Cambios del 14 de noviembre de 2026, limitados al frontend existente:

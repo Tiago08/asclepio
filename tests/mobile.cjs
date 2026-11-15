@@ -39,7 +39,7 @@ export const supabase = {
    if(url.includes('/js/supabaseClient.js')) return route.fulfill({contentType:'text/javascript',body:mock});
    if(url.includes('/js/app.js')) {
     const source=fs.readFileSync(path.join(__dirname,'../js/app.js'),'utf8');
-    return route.fulfill({contentType:'text/javascript',body:source+'\nwindow.testApp={openQuantityStep,openQuickAddForm,openNewFoodForm,openActivityForm,openWaterForm,showPanel,renderSleep,renderRings,renderInsight,foodDecimal};'});
+    return route.fulfill({contentType:'text/javascript',body:source+'\nwindow.testApp={openQuantityStep,openQuickAddForm,openNewFoodForm,openActivityForm,openWaterForm,showPanel,renderSleep,renderRings,renderInsight,refreshAfterLog,foodDecimal};'});
    }
    if(!url.startsWith('http://127.0.0.1:8765')) return route.fulfill({contentType:url.includes('fonts')?'text/css':'text/javascript',body:''});
    return route.continue();
@@ -216,7 +216,7 @@ export const supabase = {
   assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('asclepio_sleep_test-user')).fields.includes('ruido')),true);
   assert.equal(await page.evaluate(()=>window.db.activity_logs[0].data.duracion_h),7.5);
   await page.locator('button[data-tab="ranking"]').click();
-  const ranking=await page.evaluate(async()=> (await import('/js/activity.js?v=28')).getRanking('2000-01-01'));
+  const ranking=await page.evaluate(async()=> (await import('/js/activity.js?v=29')).getRanking('2000-01-01'));
   assert.equal(ranking[0].points_total,1100);
   const pointReads=await page.evaluate(()=>window.reads.filter(t=>t==='daily_points').length);
   await page.locator('[data-rank-mode="total"]').click();
@@ -226,16 +226,16 @@ export const supabase = {
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=390),true,tab+' sin desbordamiento');
   }
   const metrics=await page.evaluate(async()=>{
-   const m=await import('/js/sleep.js?v=28');
+   const m=await import('/js/sleep.js?v=29');
    return [m.sleepMetrics({horaDormir:'23:30',horaDespertar:'07:00',despierto_min:30}),m.sleepMetrics({horaDormir:'07:00',horaDespertar:'07:00'}),m.sleepScore([],420)];
   });
   assert.equal(metrics[0].dur,420);assert.equal(metrics[1].dur,null);assert.equal(metrics[2],null);
-  const invalid=await page.evaluate(async()=> (await import('/js/health.js?v=28')).suggestGoals({sex:'hombre',height_cm:175,birth_year:2020,training_days:3},75));
+  const invalid=await page.evaluate(async()=> (await import('/js/health.js?v=29')).suggestGoals({sex:'hombre',height_cm:175,birth_year:2020,training_days:3},75));
   assert.equal(invalid,null);
   // Límites del cálculo y sueño cruzando medianoche, sin datos suficientes.
   const boundary=await page.evaluate(async()=>{
-   const {suggestGoals}=await import('/js/health.js?v=28');
-   const {sleepMetrics,sleepScore}=await import('/js/sleep.js?v=28');
+   const {suggestGoals}=await import('/js/health.js?v=29');
+   const {sleepMetrics,sleepScore}=await import('/js/sleep.js?v=29');
    const s=suggestGoals({sex:'hombre',height_cm:175.5,birth_year:2001,training_days:0,pace_kg_week:-0.75},74.5,2026);
    return {floor:s.goals.goal_kcal>=10*74.5+6.25*175.5-5*25+5,
     awake:sleepMetrics({horaDormir:'23:00',horaDespertar:'07:00',despierto_min:480}).dur,
@@ -281,6 +281,100 @@ export const supabase = {
    await page.waitForSelector('.sleep-score');
    await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR,'sueno.png'),fullPage:true});
   }
+  const nutrientChecks=await page.evaluate(async()=>{
+   const {microTotals,microStatus,microTargets}=await import('/js/micros.js?v=29');
+   const {usdaFoodToRow}=await import('/js/foods.js?v=29');
+   const a=microTotals([{iron_mg:0,micros:{zinc_mg:1}},{iron_mg:null,micros:{zinc_mg:''}}]);
+   const target=microTargets('mujer',30,2000).find(t=>t.key==='iron_mg');
+   const converted=usdaFoodToRow({fdcId:1,description:'Test',foodNutrients:[
+    {nutrientNumber:'304',value:.1,unitName:'G'},
+    {nutrientNumber:'328',value:5,unitName:'µg'},
+    {nutrientNumber:'320',value:100,unitName:'IU'},
+    {nutrientNumber:'417',value:200,unitName:'UG'},
+    {nutrientNumber:'629',value:.2,unitName:'G'}]});
+   return {coverage:a.coverage,zero:a.totals.iron_mg,partial:microStatus(target,0,true,false),
+    sugar:microTargets('mujer',30,2000).find(t=>t.key==='sugars_g'),
+    vitaminD:microTargets('hombre',75,2000).find(t=>t.key==='vit_d_mcg'),converted};
+  });
+  assert.deepEqual(nutrientChecks.coverage.iron_mg,{known:1,total:2});
+  assert.deepEqual(nutrientChecks.coverage.zinc_mg,{known:1,total:2});
+  assert.equal(nutrientChecks.zero,0);assert.equal(nutrientChecks.partial,'partial');
+  assert.equal(nutrientChecks.sugar.max,null);assert.equal(nutrientChecks.vitaminD.goal,20);
+  assert.equal(nutrientChecks.converted.micros.magnesium_mg,100);
+  assert.equal(nutrientChecks.converted.vit_d_mcg,5);
+  assert.equal(nutrientChecks.converted.vit_a_mcg,null);
+  assert.equal(nutrientChecks.converted.micros.folate_mcg,undefined);
+  assert.equal(nutrientChecks.converted.micros.omega3_mg,undefined);
+  await page.locator('button[data-tab="hoy"]').click();
+  await page.locator('#smartDiary > summary').click();
+  assert.ok(await page.locator('[data-smart-food]').count()>0);
+  const firstSuggestion=await page.locator('[data-smart-food]').first().textContent();
+  await page.locator('[data-smart-hide]').first().click();
+  assert.notEqual(await page.locator('[data-smart-food]').first().textContent(),firstSuggestion);
+  await page.locator('#smartFoodArea details summary').click();
+  await page.locator('#resetHiddenFoods').click();
+  assert.equal(await page.locator('[data-smart-food]').first().textContent(),firstSuggestion);
+  await page.locator('[data-smart-food]').first().tap();
+  assert.equal(await page.locator('#f_qty').isVisible(),true);
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('#sheet.hidden',{state:'attached'});
+  await page.locator('#completeFoodDay').check();
+  assert.equal(await page.evaluate(()=>Object.keys(JSON.parse(localStorage.getItem('asclepio_learning_test-user')).completed).length),1);
+  await page.locator('#microArea > details > summary').click();
+  const beforeEstimate=await page.evaluate(()=>window.writes.length);
+  await page.locator('#estimateMicrosToggle').check();
+  await page.waitForFunction(()=>document.querySelector('#microArea').textContent.includes('1 de 7 modelos superan la referencia'));
+  assert.equal(await page.evaluate(()=>window.writes.length),beforeEstimate,'Entrenar no escribe datos');
+  await page.evaluate(async()=>{
+   const {BASICS}=await import('/js/basics.js?v=29');
+   const f={...BASICS.find(f=>f.name==='Avena en hojuelas'),id:'synthetic-food',usda_fdc_id:'synthetic-food',name:'Prueba ML'};
+   f.micros={...f.micros};delete f.micros.zinc_mg;
+   window.db.foods.push(f);
+   const d=new Date(),date=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+   window.db.food_logs.push({...f,id:'ml-log',food_id:f.id,user_id:'test-user',log_date:date,log_time:'12:00',quantity:1,momento:'Almuerzo',food_name_snapshot:f.name});
+   await window.testApp.refreshAfterLog();
+  });
+  assert.equal(await page.locator('#completeFoodDay').isChecked(),false,'Cambiar comida invalida la confirmación');
+  assert.match(await page.locator('#microArea').textContent(),/estimados aparte/);
+  assert.match(await page.locator('#microArea').textContent(),/ML: vecinos nutricionales/);
+  if(process.env.SCREENSHOT_DIR){
+   await page.locator('#microArea').scrollIntoViewIfNeeded();
+   await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR,'micros-ml.png'),fullPage:true});
+  }
+  await page.locator('#estimateMicrosToggle').uncheck();
+  assert.equal(await page.locator('.micro-estimate').count(),0);
+  await page.locator('button[data-tab="datos"]').click();
+  await page.locator('#energyModelCard > summary').click();
+  await page.waitForFunction(()=>!document.querySelector('#refreshEnergyBtn').disabled);
+  assert.match(await page.locator('#energyModelArea').textContent(),/Recopilando/);
+  assert.ok(await page.locator('[data-complete-date]').count()>0);
+  await page.locator('#energyModelCard > details').first().locator('summary').click();
+  await page.locator('[data-complete-date]').first().check();
+  const learningWrites=await page.evaluate(()=>window.writes.length);
+  await page.evaluate(async()=>{
+   const {foodSignature}=await import('/js/intelligence.js?v=29');
+   const {suggestGoals}=await import('/js/health.js?v=29');
+   const day=n=>{const d=new Date();d.setDate(d.getDate()-n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+   const body=window.db.body_profiles[0],prior=suggestGoals(body,80).tdee,actual=prior+400;
+   const foods=[],weights=[],completed={};
+   for(let i=0;i<50;i++){
+    const r={id:'energy-'+i,user_id:'test-user',log_date:day(50-i),log_time:'12:00',kcal:2200};
+    foods.push(r);weights.push({id:'weight-'+i,user_id:'test-user',log_date:r.log_date,weight_kg:80+(2200-actual)/7700*i});
+    completed[r.log_date]=foodSignature([r]);
+   }
+   window.db.food_logs=foods;window.db.weight_logs=weights;
+   const settings=JSON.parse(localStorage.getItem('asclepio_learning_test-user'));
+   settings.completed=completed;localStorage.setItem('asclepio_learning_test-user',JSON.stringify(settings));
+  });
+  await page.locator('#refreshEnergyBtn').click();
+  await page.waitForSelector('#useAdaptiveGoal',{timeout:5000}).catch(async error=>{console.error('Modelo:',await page.locator('#energyModelArea').textContent());throw error;});
+  assert.match(await page.locator('#energyModelArea').textContent(),/Gasto estimado/);
+  if(process.env.SCREENSHOT_DIR) await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR,'energia-modelo.png'),fullPage:true});
+  await page.locator('#useAdaptiveGoal').click();
+  assert.equal(await page.locator('#goalEditor').getAttribute('open'),'');
+  assert.match(await page.locator('#goalStatus').textContent(),/sin guardar/);
+  assert.equal(await page.evaluate(()=>window.writes.length),learningWrites,'Proponer no guarda metas');
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=390),true);
   assert.deepEqual(errors,[]);
   console.log('OK: decimales, nutrientes, validación, objetivos, historial, fallo de guardado, sueño, ranking paginado y 5 pestañas a 390x844; sin errores de consola.');
  } finally {await browser.close();}
